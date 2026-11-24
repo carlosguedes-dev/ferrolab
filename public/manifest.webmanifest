@@ -1,0 +1,20 @@
+{
+  "name": "FerroLab — Força & Recomposição",
+  "short_name": "FerroLab",
+  "description": "Acompanhamento de musculação mobile-first com progressão dupla, 1RM em tempo real, cronômetros e privacidade local-first.",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090B0E",
+  "theme_color": "#090B0E",
+  "lang": "pt-BR",
+  "categories": ["fitness", "health", "sports", "utilities"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
