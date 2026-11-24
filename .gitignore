@@ -1,9 +1,9 @@
 node_modules
 dist
 dist-ssr
-android
-ios
-release
+/android
+/ios
+/release
 *.local
 .DS_Store
 coverage
