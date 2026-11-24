@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileText, ShieldCheck, Stethoscope, UserCheck } from 'lucide-react';
 import type { UserConsentState } from '../types/workout';
 import { LEGAL_CONSENT_VERSION } from '../engines/storage';
+import { SheetModal } from './MotionPrimitives';
 
 interface ConsentOnboardingModalProps {
   onAccept: (consent: UserConsentState) => void;
@@ -32,185 +33,139 @@ export const ConsentOnboardingModal: React.FC<ConsentOnboardingModalProps> = ({
   };
 
   return (
-    <div
-      className="modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="consent-modal-title"
-      style={{ zIndex: 80 }}
-    >
-      <div className="modal-sheet" style={{ borderColor: 'var(--border-volt)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 14,
-              background: 'var(--accent-volt-dim)',
-              border: '1.5px solid var(--border-volt)',
-              display: 'grid',
-              placeItems: 'center',
-              color: 'var(--accent-volt)',
-              flexShrink: 0,
-            }}
-          >
-            <ShieldCheck size={24} />
+    <SheetModal ariaLabel="Consentimento e privacidade LGPD" zIndex={80}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        <img
+          src="./icon-192.png"
+          alt="FerroLab"
+          width={46}
+          height={46}
+          style={{ borderRadius: 13, border: '1px solid var(--hairline-strong)' }}
+        />
+        <div>
+          <div className="t-kicker" style={{ color: 'var(--volt)' }}>
+            Privacidade Local-First · LGPD
           </div>
-          <div>
-            <span className="pill pill-volt">PRIVACIDADE LOCAL-FIRST · LGPD</span>
-            <h2
-              id="consent-modal-title"
-              className="font-display"
-              style={{ margin: '4px 0 0', fontSize: 25, lineHeight: 1.05 }}
-            >
-              Antes do seu primeiro treino
-            </h2>
-          </div>
+          <h2 className="t-title" style={{ fontSize: 22, marginTop: 2 }}>
+            Antes do seu primeiro treino
+          </h2>
         </div>
+      </div>
 
-        <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-secondary)' }}>
-          O <strong>FerroLab</strong> funciona <strong>100% no seu dispositivo</strong>: não criamos
-          conta em servidor, não rastreamos sua localização, não usamos anúncios nem SDKs de
-          terceiros. Para cumprir a <strong>LGPD (Lei 13.709/2018)</strong> e o{' '}
-          <strong>ECA (Lei 8.069/1990)</strong>, confirme os itens abaixo:
-        </p>
+      <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.5 }}>
+        O <strong>FerroLab</strong> funciona 100% no seu aparelho — sem servidores, sem rastreadores e
+        sem geolocalização. Para conformidade com a <strong>LGPD</strong> e o <strong>ECA</strong>,
+        confirme:
+      </p>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-          {/* 1. ECA & LGPD Art. 14 */}
-          <label
-            style={{
-              display: 'flex',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: '#0A0D12',
-              border: ageConfirmed
-                ? '1px solid var(--border-volt)'
-                : '1px solid var(--border-subtle)',
-              cursor: 'pointer',
-              fontSize: 12.5,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={ageConfirmed}
-              onChange={(e) => setAgeConfirmed(e.target.checked)}
-              style={{ marginTop: 2, accentColor: '#C8FF2E', flexShrink: 0 }}
-            />
-            <span>
-              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-primary)' }}>
-                <UserCheck size={13} color="#C8FF2E" /> Maioridade / Proteção de Menores (ECA):
-              </strong>{' '}
-              Declaro ter <strong>18 anos ou mais</strong>, ou utilizar o aplicativo sob supervisão e
-              consentimento específico e em destaque de pelo menos um dos pais ou responsável legal
-              (Art. 14 da LGPD).
-            </span>
-          </label>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+        <label
+          style={{
+            display: 'flex',
+            gap: 10,
+            padding: '11px 12px',
+            borderRadius: 14,
+            background: 'var(--bg-canvas)',
+            border: ageConfirmed ? '1px solid var(--volt-border)' : '1px solid var(--hairline)',
+            fontSize: 12.5,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={ageConfirmed}
+            onChange={(e) => setAgeConfirmed(e.target.checked)}
+            style={{ marginTop: 2, accentColor: 'var(--volt)', flexShrink: 0 }}
+          />
+          <span>
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <UserCheck size={13} color="var(--volt)" /> Maioridade / Responsável (ECA):
+            </strong>{' '}
+            Declaro ter 18+ anos ou usar sob supervisão e consentimento de responsável legal (LGPD Art. 14).
+          </span>
+        </label>
 
-          {/* 2. Dados sensíveis de saúde LGPD Art. 11 */}
-          <label
-            style={{
-              display: 'flex',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: '#0A0D12',
-              border: healthConsent
-                ? '1px solid var(--border-volt)'
-                : '1px solid var(--border-subtle)',
-              cursor: 'pointer',
-              fontSize: 12.5,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={healthConsent}
-              onChange={(e) => setHealthConsent(e.target.checked)}
-              style={{ marginTop: 2, accentColor: '#C8FF2E', flexShrink: 0 }}
-            />
-            <span>
-              <strong style={{ color: 'var(--text-primary)' }}>
-                Consentimento para Dados Sensíveis de Saúde (LGPD, Art. 11, I):
-              </strong>{' '}
-              Autorizo o armazenamento exclusivamente local no meu navegador/dispositivo de dados
-              físicos inseridos por mim (peso corporal, cargas, séries e cardio), ciente de que posso
-              exportar ou apagar tudo permanentemente a qualquer momento.
-            </span>
-          </label>
+        <label
+          style={{
+            display: 'flex',
+            gap: 10,
+            padding: '11px 12px',
+            borderRadius: 14,
+            background: 'var(--bg-canvas)',
+            border: healthConsent ? '1px solid var(--volt-border)' : '1px solid var(--hairline)',
+            fontSize: 12.5,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={healthConsent}
+            onChange={(e) => setHealthConsent(e.target.checked)}
+            style={{ marginTop: 2, accentColor: 'var(--volt)', flexShrink: 0 }}
+          />
+          <span>
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <ShieldCheck size={13} color="var(--emerald)" /> Dados Sensíveis (LGPD Art. 11):
+            </strong>{' '}
+            Autorizo o armazenamento exclusivamente local de peso corporal, cargas e cardio, podendo exportar ou apagar tudo a qualquer momento.
+          </span>
+        </label>
 
-          {/* 3. Aviso de Saúde / CONFEF / CFM */}
-          <label
-            style={{
-              display: 'flex',
-              gap: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: '#0A0D12',
-              border: healthDisclaimer
-                ? '1px solid var(--border-volt)'
-                : '1px solid var(--border-subtle)',
-              cursor: 'pointer',
-              fontSize: 12.5,
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={healthDisclaimer}
-              onChange={(e) => setHealthDisclaimer(e.target.checked)}
-              style={{ marginTop: 2, accentColor: '#C8FF2E', flexShrink: 0 }}
-            />
-            <span>
-              <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-primary)' }}>
-                <Stethoscope size={13} color="#22D3EE" /> Aviso de Saúde & Segurança (CONFEF/CFM):
-              </strong>{' '}
-              Compreendo que o FerroLab é uma ferramenta de registro pessoal e cálculos matemáticos
-              (1RM, progressão dupla, anilhas) que <strong>não substitui avaliação médica</strong> nem
-              prescrição individualizada por Profissional de Educação Física (CREF).
-            </span>
-          </label>
-        </div>
+        <label
+          style={{
+            display: 'flex',
+            gap: 10,
+            padding: '11px 12px',
+            borderRadius: 14,
+            background: 'var(--bg-canvas)',
+            border: healthDisclaimer ? '1px solid var(--volt-border)' : '1px solid var(--hairline)',
+            fontSize: 12.5,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={healthDisclaimer}
+            onChange={(e) => setHealthDisclaimer(e.target.checked)}
+            style={{ marginTop: 2, accentColor: 'var(--volt)', flexShrink: 0 }}
+          />
+          <span>
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <Stethoscope size={13} color="var(--cyan)" /> Aviso de Saúde (CONFEF/CFM):
+            </strong>{' '}
+            Sei que o app é um diário e calculadora matemática pessoal e não substitui avaliação médica nem Profissional de Educação Física (CREF).
+          </span>
+        </label>
+      </div>
 
-        {/* Links para documentos legais completos */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            style={{ flex: 1 }}
-            onClick={() => onOpenLegalDoc('privacy')}
-          >
-            <FileText size={12} /> Política de Privacidade
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            style={{ flex: 1 }}
-            onClick={() => onOpenLegalDoc('terms')}
-          >
-            <FileText size={12} /> Termos de Uso
-          </button>
-        </div>
+      <div className="fl-grid-2" style={{ marginBottom: 14 }}>
+        <button type="button" className="fl-btn fl-btn-ghost fl-btn-xs" onClick={() => onOpenLegalDoc('privacy')}>
+          <FileText size={12} /> Política de Privacidade
+        </button>
+        <button type="button" className="fl-btn fl-btn-ghost fl-btn-xs" onClick={() => onOpenLegalDoc('terms')}>
+          <FileText size={12} /> Termos de Uso
+        </button>
+      </div>
 
+      <button
+        type="button"
+        className="fl-btn fl-btn-volt fl-btn-block"
+        disabled={!canProceed}
+        onClick={handleConfirm}
+      >
+        Confirmar & Acessar FerroLab
+      </button>
+
+      {onDecline && (
         <button
           type="button"
-          className="btn btn-primary btn-block"
-          disabled={!canProceed}
-          style={{ opacity: canProceed ? 1 : 0.45, cursor: canProceed ? 'pointer' : 'not-allowed' }}
-          onClick={handleConfirm}
+          className="fl-btn fl-btn-ghost fl-btn-xs fl-btn-block"
+          style={{ marginTop: 8 }}
+          onClick={onDecline}
         >
-          Confirmar & Acessar FerroLab
+          Não concordo agora
         </button>
-
-        {onDecline && (
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs btn-block"
-            style={{ marginTop: 8 }}
-            onClick={onDecline}
-          >
-            Não concordo agora
-          </button>
-        )}
-      </div>
-    </div>
+      )}
+    </SheetModal>
   );
 };

@@ -1,8 +1,19 @@
-const CACHE_NAME = 'ferrolab-offline-v1';
+const CACHE_NAME = 'ferrolab-offline-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(['./', './index.html', './icon.svg', './manifest.webmanifest'])),
+    caches
+      .open(CACHE_NAME)
+      .then((cache) =>
+        cache.addAll([
+          './',
+          './index.html',
+          './icon.svg',
+          './icon-192.png',
+          './icon-512.png',
+          './manifest.webmanifest',
+        ]),
+      ),
   );
   self.skipWaiting();
 });

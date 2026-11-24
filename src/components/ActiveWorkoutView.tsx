@@ -1,22 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
-  ArrowDown,
   Bookmark,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Disc,
   Flame,
-  HeartPulse,
   Info,
   Link2,
+  ListChecks,
   Pause,
   Play,
   Plus,
-  RefreshCw,
   Sun,
+  Timer,
   Trash2,
   TrendingUp,
   Trophy,
+  X,
   Zap,
 } from 'lucide-react';
 import type {
@@ -44,8 +47,13 @@ import {
   getLastExerciseLog,
 } from '../engines/progression';
 import { playPRFanfareCue, playSetCheckedCue } from '../engines/audio';
-import { AnatomyIllustration } from './AnatomyIllustration';
+import { MUSCLE_LABELS } from '../data/programPreset';
 import { IsometricTimerInline } from './IsometricTimerInline';
+import {
+  SPRING_SNAPPY,
+  SheetModal,
+  SubScreenSlide,
+} from './MotionPrimitives';
 
 interface ActiveWorkoutViewProps {
   draft: ActiveWorkoutDraft;
@@ -70,7 +78,7 @@ interface ActiveWorkoutViewProps {
   onShowToast: (msg: string, variant: 'pr' | 'info' | 'error') => void;
 }
 
-type RenderBlock =
+type StationBlock =
   | { kind: 'single'; index: number; log: SessionExerciseLog; template: ExerciseTemplate }
   | {
       kind: 'biset';
@@ -81,7 +89,8 @@ type RenderBlock =
       logB: SessionExerciseLog;
       templateA: ExerciseTemplate;
       templateB: ExerciseTemplate;
-    };
+    }
+  | { kind: 'cardio' };
 
 export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
   draft,
@@ -108,13 +117,14 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
   const [elapsedSec, setElapsedSec] = useState(() =>
     Math.max(0, Math.floor((Date.now() - draft.startedAt) / 1000)),
   );
+  const [stationIdx, setStationIdx] = useState(0);
+  const [slideDir, setSlideDir] = useState(1);
+  const [viewMode, setViewMode] = useState<'focus' | 'all'>('focus');
+  const [mapSheetOpen, setMapSheetOpen] = useState(false);
+  const [finishSheetOpen, setFinishSheetOpen] = useState(false);
   const [cardioTimerRunning, setCardioTimerRunning] = useState(false);
   const [cardioTimerSec, setCardioTimerSec] = useState(0);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-  const [confirmPartialFinish, setConfirmPartialFinish] = useState(false);
-  const [showQuickTimer, setShowQuickTimer] = useState(false);
 
-  // Cronômetro geral da sessão
   useEffect(() => {
     const id = window.setInterval(() => {
       setElapsedSec(Math.max(0, Math.floor((Date.now() - draft.startedAt) / 1000)));
@@ -122,30 +132,23 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
     return () => window.clearInterval(id);
   }, [draft.startedAt]);
 
-  // Cronômetro embutido para o cardio pós-treino
   useEffect(() => {
     if (!cardioTimerRunning) return;
-    const id = window.setInterval(() => {
-      setCardioTimerSec((s) => s + 1);
-    }, 1000);
+    const id = window.setInterval(() => setCardioTimerSec((s) => s + 1), 1000);
     return () => window.clearInterval(id);
   }, [cardioTimerRunning]);
 
   const templateMap = useMemo(() => {
     const map = new Map<string, ExerciseTemplate>();
-    for (const ex of dayTemplate.exercises) {
-      map.set(ex.id, ex);
-    }
+    for (const ex of dayTemplate.exercises) map.set(ex.id, ex);
     return map;
   }, [dayTemplate.exercises]);
 
-  // Métricas vivas da sessão atual (exclui aquecimentos)
   const liveStats = useMemo(() => {
     let completedValid = 0;
     let plannedValid = 0;
     let tonnage = 0;
     let prs = 0;
-
     for (const ex of draft.exercises) {
       for (const s of ex.sets) {
         if (!s.isWarmup) {
@@ -161,14 +164,12 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
     return { completedValid, plannedValid, tonnage: Math.round(tonnage), prs };
   }, [draft.exercises]);
 
-  // Agrupa exercícios consecutivos que compartilham bisetGroup
-  const blocks = useMemo<RenderBlock[]>(() => {
-    const result: RenderBlock[] = [];
+  const stations = useMemo<StationBlock[]>(() => {
+    const result: StationBlock[] = [];
     for (let i = 0; i < draft.exercises.length; i++) {
       const log = draft.exercises[i];
       const tpl = templateMap.get(log.exerciseId) ?? dayTemplate.exercises[i];
       if (!tpl) continue;
-
       const nextLog = draft.exercises[i + 1];
       const nextTpl = nextLog
         ? templateMap.get(nextLog.exerciseId) ?? dayTemplate.exercises[i + 1]
@@ -192,13 +193,26 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
           templateA: tpl,
           templateB: nextTpl,
         });
-        i += 1; // pula B pois já foi agrupado
+        i += 1;
       } else {
         result.push({ kind: 'single', index: i, log, template: tpl });
       }
     }
+    if (dayTemplate.cardio.enabled) {
+      result.push({ kind: 'cardio' });
+    }
     return result;
-  }, [draft.exercises, templateMap, dayTemplate.exercises]);
+  }, [draft.exercises, templateMap, dayTemplate]);
+
+  const safeStationIdx = Math.min(stationIdx, Math.max(0, stations.length - 1));
+  const currentStation = stations[safeStationIdx];
+
+  const goToStation = (nextIndex: number) => {
+    const clamped = Math.max(0, Math.min(stations.length - 1, nextIndex));
+    setSlideDir(clamped >= safeStationIdx ? 1 : -1);
+    setStationIdx(clamped);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const updateSetField = (
     exIndex: number,
@@ -213,8 +227,6 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
       const targetSet = nextSets[setIndex];
       nextSets[setIndex] = { ...targetSet, ...patch };
 
-      // Se editou a carga da 1ª série válida do 1º exercício do dia, sincroniza automaticamente
-      // séries de aquecimento ainda não concluídas (50%, 70%, 85%)
       if (
         exIndex === 0 &&
         !targetSet.isWarmup &&
@@ -273,7 +285,7 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
           ? 'Novo PR de 1RM!'
           : detected.includes('weight')
             ? 'Novo PR de Carga!'
-            : 'Novo Recorde de Volume!';
+            : 'Novo Recorde!';
         onShowToast(
           `${label} ${template.name}: ${formatKg(candidate.weightKg)} kg × ${candidate.reps}${template.isIsometric ? 's' : ''}`,
           'pr',
@@ -291,19 +303,14 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
       prTypes: nextCompleted ? prTypes : undefined,
     });
 
-    // Regra inteligente do timer de descanso:
-    // - Se Biset A: NÃO dispara descanso (orienta seguir imediatamente para B!)
-    // - Se série de aquecimento: descanso curto opcional (45 s)
-    // - Se série válida normal ou Biset B: dispara automaticamente o descanso exato do exercício
     if (nextCompleted && autoStartRestTimer) {
       if (template.bisetRole === 'A' && !currentSet.isWarmup) {
         onShowToast(
-          `Série ${template.orderLabel} concluída — sem descanso! Vá direto para ${partnerBOrderLabel ?? 'B'}.`,
+          `${template.orderLabel} concluído — sem descanso! Siga direto para ${partnerBOrderLabel ?? 'B'}.`,
           'info',
         );
         return;
       }
-
       const restSec = currentSet.isWarmup ? 45 : template.restSeconds;
       if (restSec > 0) {
         const now = Date.now();
@@ -311,7 +318,7 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
           exerciseName: currentSet.isWarmup
             ? `Aquecimento · ${template.name}`
             : template.bisetRole === 'B'
-              ? `Pós-Biset (${template.orderLabel}) · ${template.name}`
+              ? `Pós-Biset (${template.orderLabel})`
               : template.name,
           durationSeconds: restSec,
           remainingSeconds: restSec,
@@ -363,11 +370,16 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
     });
   };
 
-  const applySuggestedWeight = (exIndex: number, weightKg: number, isFirstEx: boolean, incKg: number) => {
+  const applySuggestedWeight = (
+    exIndex: number,
+    weightKg: number,
+    isFirstEx: boolean,
+    incKg: number,
+  ) => {
     onUpdateDraft((prev) => {
       const nextEx = [...prev.exercises];
       const ex = { ...nextEx[exIndex] };
-      const updatedSets = ex.sets.map((s) => {
+      ex.sets = ex.sets.map((s) => {
         if (s.isWarmup && s.warmupPercent) {
           return {
             ...s,
@@ -376,15 +388,15 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
         }
         return s.completed ? s : { ...s, weightKg };
       });
-      ex.sets = updatedSets;
       nextEx[exIndex] = ex;
       return { ...prev, exercises: nextEx };
     });
-    if (isFirstEx) {
-      onShowToast(`Carga ${formatKg(weightKg)} kg aplicada (e aquecimento recalculado)!`, 'info');
-    } else {
-      onShowToast(`Carga ${formatKg(weightKg)} kg aplicada às séries pendentes.`, 'info');
-    }
+    onShowToast(
+      isFirstEx
+        ? `${formatKg(weightKg)} kg aplicado (+ aquecimento ajustado)`
+        : `${formatKg(weightKg)} kg aplicado às séries`,
+      'info',
+    );
   };
 
   const regenerateWarmupsForFirst = (exIndex: number, template: ExerciseTemplate) => {
@@ -401,12 +413,11 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
     onUpdateDraft((prev) => {
       const nextEx = [...prev.exercises];
       const target = { ...nextEx[exIndex] };
-      const workingOnly = target.sets.filter((s) => !s.isWarmup);
-      target.sets = [...warmups, ...workingOnly];
+      target.sets = [...warmups, ...target.sets.filter((s) => !s.isWarmup)];
       nextEx[exIndex] = target;
       return { ...prev, exercises: nextEx, warmupsEnabled: true };
     });
-    onShowToast('Séries de aquecimento (50%×8 · 70%×4 · 85%×2) atualizadas!', 'info');
+    onShowToast('Aquecimento (50% · 70% · 85%) atualizado.', 'info');
   };
 
   const updateCardio = (patch: Partial<CardioLog>) => {
@@ -418,7 +429,6 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
         modality: prev.cardio?.modality ?? dayTemplate.cardio.modalitySuggestion,
         minutes: prev.cardio?.minutes ?? (dayTemplate.cardio.targetMinutesMin || 20),
         distanceKm: prev.cardio?.distanceKm,
-        inclinePercent: prev.cardio?.inclinePercent,
         speedKmh: prev.cardio?.speedKmh,
         notes: prev.cardio?.notes ?? '',
         completed: prev.cardio?.completed ?? false,
@@ -427,7 +437,7 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
     }));
   };
 
-  const renderExerciseCard = (
+  const renderExerciseSurface = (
     exIndex: number,
     log: SessionExerciseLog,
     template: ExerciseTemplate,
@@ -441,166 +451,153 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
       formula1RM,
       !!template.isIsometric,
     );
-
-    // Fallback para exibir 1RM do primeiro set preenchido mesmo antes de concluir
     const firstValidSet = log.sets.find((s) => !s.isWarmup);
-    const previewWeight = bestWeightKg || firstValidSet?.weightKg || progression.suggestedWeightKg || 0;
+    const previewWeight =
+      bestWeightKg || firstValidSet?.weightKg || progression.suggestedWeightKg || 0;
     const previewReps = bestReps || firstValidSet?.reps || template.repMax;
     const live1RM =
       !template.isIsometric && previewWeight > 0 && previewReps > 0
         ? calculate1RM(previewWeight, previewReps, formula1RM, template.loadIncrementKg)
         : null;
-
     const pinnedNote = machineNotes[template.id] ?? '';
-    const hasWarmups = log.sets.some((s) => s.isWarmup);
 
-    let workingCounter = 0;
+    const warmupSets = log.sets
+      .map((s, idx) => ({ set: s, idx }))
+      .filter((item) => item.set.isWarmup);
+    const workingSets = log.sets
+      .map((s, idx) => ({ set: s, idx }))
+      .filter((item) => !item.set.isWarmup);
+
+    const gridCols = showRirColumn
+      ? '34px 1fr 1fr 40px 44px'
+      : '34px 1fr 1fr 44px';
 
     return (
       <div
         key={log.exerciseId}
         id={`exercise-card-${log.exerciseId}`}
-        className="card"
-        style={{
-          padding: 12,
-          scrollMarginTop: 76,
-          borderColor:
-            template.bisetGroup
-              ? 'rgba(255, 107, 44, 0.28)'
-              : isFirstExercise
-                ? 'var(--border-volt)'
-                : 'var(--border-subtle)',
-        }}
+        className="fl-card"
+        style={{ padding: '18px 16px' }}
       >
-        {/* Cabeçalho do exercício com miniatura anatômica */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-              <span
-                className={`pill ${template.bisetGroup ? 'pill-ember' : 'pill-volt'} font-mono`}
-                style={{ padding: '2px 7px' }}
-              >
-                {template.orderLabel}
+        {/* Cabeçalho limpo e editorial */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="t-kicker" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: template.bisetGroup ? '#ff8c66' : 'var(--volt)' }}>
+                #{template.orderLabel}
               </span>
-              <span className="pill font-mono" style={{ padding: '2px 7px' }}>
+              <span>·</span>
+              <span>{MUSCLE_LABELS[template.primaryMuscle]}</span>
+              <span>·</span>
+              <span className="t-mono">
                 {template.targetSets}×{template.repMin}–{template.repMax}
                 {template.isIsometric ? 's' : ''}
               </span>
-              <span className="pill" style={{ padding: '2px 7px' }}>
-                {template.restLabel}
-              </span>
-              {template.isUnilateral && (
-                <span className="pill pill-cyan" style={{ padding: '2px 7px' }}>
-                  p/ lado
-                </span>
-              )}
             </div>
-            <h3
-              className="font-display"
-              style={{ margin: 0, fontSize: 20, lineHeight: 1.12, fontWeight: 700 }}
+            <h2
+              style={{
+                margin: '6px 0 4px',
+                fontSize: 20,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                lineHeight: 1.2,
+              }}
             >
               {template.name}
-            </h3>
-            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
+            </h2>
+            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-secondary)' }}>
               {template.techniqueCue}
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
-            title="Ver anatomia, execução, 1RM e ajustes"
-            aria-label={`Ver anatomia e ajustes de ${template.name}`}
-          >
-            <AnatomyIllustration
-              diagram={template.anatomyDiagram}
-              primaryMuscle={template.primaryMuscle}
-              secondaryMuscles={template.secondaryMuscles}
-              compact
-            />
-          </button>
         </div>
 
-        {/* Anotação fixa do aparelho (se houver) */}
+        {/* Nota fixa do aparelho (discreta) */}
         {pinnedNote && (
           <button
             type="button"
             onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
             style={{
-              marginTop: 8,
-              width: '100%',
-              display: 'flex',
+              marginTop: 10,
+              display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
-              padding: '6px 9px',
-              borderRadius: 9,
-              background: 'rgba(34, 211, 238, 0.08)',
-              border: '1px solid rgba(34, 211, 238, 0.26)',
-              color: '#A5F3FC',
-              fontSize: 11.5,
-              textAlign: 'left',
+              fontSize: 12,
+              color: 'var(--cyan)',
             }}
           >
-            <Bookmark size={12} style={{ flexShrink: 0 }} />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {pinnedNote}
-            </span>
+            <Bookmark size={12} />
+            <span>{pinnedNote}</span>
           </button>
         )}
 
-        {/* Banner de Progressão Dupla Inteligente */}
-        <div
-          style={{
-            marginTop: 9,
-            padding: '8px 10px',
-            borderRadius: 11,
-            background:
-              progression.status === 'progress'
-                ? 'var(--accent-volt-dim)'
-                : progression.status === 'consolidate'
-                  ? 'var(--accent-amber-dim)'
-                  : 'rgba(255,255,255,0.035)',
-            border:
-              progression.status === 'progress'
-                ? '1px solid var(--border-volt)'
-                : progression.status === 'consolidate'
-                  ? '1px solid rgba(245,158,11,0.4)'
-                  : '1px solid var(--border-subtle)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: 12,
-                fontWeight: 700,
-                color:
-                  progression.status === 'progress'
-                    ? 'var(--accent-volt)'
-                    : progression.status === 'consolidate'
-                      ? '#FBBF24'
-                      : 'var(--text-primary)',
-              }}
-            >
-              <TrendingUp size={13} />
-              <span>{progression.headline}</span>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-              {progression.detail}
-            </div>
-          </div>
-
-          {progression.suggestedWeightKg !== null && (
+        {/* Linha única de ferramentas silenciosas */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+          <button
+            type="button"
+            className="fl-btn fl-btn-ghost fl-btn-xs"
+            onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
+          >
+            <Info size={13} /> Anatomia & Técnica
+          </button>
+          {live1RM && live1RM.selected > 0 && (
             <button
               type="button"
-              className={`btn btn-xs ${progression.status === 'progress' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ flexShrink: 0 }}
+              className="fl-btn fl-btn-ghost fl-btn-xs t-mono"
+              style={{ color: 'var(--cyan)' }}
+              onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
+            >
+              <Zap size={12} /> 1RM {formatKg(best1RM || live1RM.selected)}
+            </button>
+          )}
+          {!template.isIsometric && (
+            <button
+              type="button"
+              className="fl-btn fl-btn-ghost fl-btn-xs"
+              onClick={() =>
+                onOpenPlateCalc(previewWeight || 60, template.name, template.defaultBarWeightKg)
+              }
+            >
+              <Disc size={13} /> Anilhas
+            </button>
+          )}
+        </div>
+
+        {/* Barra de Progressão Dupla em 1 linha limpa */}
+        {progression.suggestedWeightKg !== null && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: '10px 12px',
+              borderRadius: 14,
+              background:
+                progression.status === 'progress' ? 'var(--volt-soft)' : 'var(--bg-elevated-2)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <TrendingUp
+                size={15}
+                color={progression.status === 'progress' ? 'var(--volt)' : 'var(--ink-secondary)'}
+                style={{ flexShrink: 0 }}
+              />
+              <span
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: progression.status === 'progress' ? 'var(--volt)' : 'var(--ink-primary)',
+                }}
+              >
+                {progression.headline}
+              </span>
+            </div>
+            <button
+              type="button"
+              className={`fl-btn fl-btn-xs ${
+                progression.status === 'progress' ? 'fl-btn-volt' : 'fl-btn-surface'
+              }`}
               onClick={() =>
                 applySuggestedWeight(
                   exIndex,
@@ -612,215 +609,245 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
             >
               Aplicar
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Barra de ferramentas rápidas do exercício: 1RM ao vivo, Anatomia, Anilhas, Aquecimento */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 8,
-            marginBottom: 10,
-          }}
-        >
-          {live1RM && live1RM.selected > 0 && (
-            <button
-              type="button"
-              className="pill pill-cyan font-mono"
-              onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
-              title="Ver tabela completa de percentuais 1RM"
+        {/* Aquecimento progressivo separado visualmente (somente 1º exercício ou se adicionado) */}
+        {warmupSets.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
             >
-              <Zap size={11} />
-              1RM {formatKg(best1RM || live1RM.selected)} kg · 85%={formatKg(live1RM.percentages[2].weightKg)}
-            </button>
-          )}
-          <button
-            type="button"
-            className="pill"
-            onClick={() => onOpenAnatomy(template, previewWeight, previewReps)}
-          >
-            <Info size={11} /> Técnica / Trocar
-          </button>
-          {!template.isIsometric && (
-            <button
-              type="button"
-              className="pill"
-              onClick={() =>
-                onOpenPlateCalc(
-                  previewWeight || 60,
-                  template.name,
-                  template.defaultBarWeightKg,
-                )
-              }
-            >
-              <Disc size={11} /> Anilhas
-            </button>
-          )}
-          {isFirstExercise && (
-            <button
-              type="button"
-              className="pill pill-amber"
-              onClick={() => regenerateWarmupsForFirst(exIndex, template)}
-            >
-              <Flame size={11} /> {hasWarmups ? 'Recalc. aquec.' : 'Gerar aquec.'}
-            </button>
-          )}
-        </div>
-
-        {/* Cabeçalho da tabela de séries */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: showRirColumn
-              ? '36px 1fr 1fr 44px 44px'
-              : '36px 1fr 1fr 44px',
-            gap: 6,
-            padding: '0 6px 5px',
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-            color: 'var(--text-muted)',
-            textAlign: 'center',
-          }}
-        >
-          <span>Série</span>
-          <span>{template.isIsometric ? 'Extra (kg)' : 'Carga (kg)'}</span>
-          <span>{template.isIsometric ? 'Tempo (s)' : 'Reps'}</span>
-          {showRirColumn && <span>RIR</span>}
-          <span>OK</span>
-        </div>
-
-        {/* Linhas de séries */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {log.sets.map((set, setIdx) => {
-            if (!set.isWarmup) workingCounter += 1;
-            const currentValidNumber = workingCounter;
-            const prevComparableSet = !set.isWarmup
-              ? prevLog?.validSets[currentValidNumber - 1]
-              : undefined;
-
-            return (
-              <div key={set.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {/* Comparação lado a lado com o último treino + badge PR */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0 4px',
-                    fontSize: 10.5,
-                  }}
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: '0.07em',
+                  textTransform: 'uppercase',
+                  color: 'var(--amber)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <Flame size={12} /> Aquecimento progressivo (não conta no 1RM)
+              </span>
+              {isFirstExercise && (
+                <button
+                  type="button"
+                  style={{ fontSize: 11, color: 'var(--ink-tertiary)' }}
+                  onClick={() => regenerateWarmupsForFirst(exIndex, template)}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {set.isWarmup ? (
-                      <span style={{ color: '#FBBF24', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                        <Flame size={10} /> SÉRIE DE AQUECIMENTO
-                        {set.warmupPercent ? ` (${set.warmupPercent}%)` : ''} — não conta no 1RM
-                      </span>
-                    ) : prevComparableSet ? (
+                  Recalcular
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {warmupSets.map(({ set, idx }) => (
+                <div
+                  key={set.id}
+                  className={`fl-set-row warmup ${set.completed ? 'done' : ''}`}
+                  style={{ gridTemplateColumns: gridCols }}
+                >
+                  <div style={{ textAlign: 'center' }}>
+                    <span
+                      className="t-mono"
+                      style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--amber)' }}
+                    >
+                      {set.warmupPercent ? `${set.warmupPercent}%` : 'AQ'}
+                    </span>
+                    <span style={{ display: 'none' }}>
+                      SÉRIE DE AQUECIMENTO ({set.warmupPercent ?? 50}%)
+                    </span>
+                  </div>
+
+                  <div className="fl-stepper">
+                    <button
+                      type="button"
+                      className="fl-stepper-btn"
+                      aria-label="Diminuir carga"
+                      onClick={() =>
+                        updateSetField(exIndex, idx, {
+                          weightKg: Math.max(0, set.weightKg - template.loadIncrementKg),
+                        })
+                      }
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      aria-label="Carga em kg"
+                      className="fl-stepper-val"
+                      value={set.weightKg}
+                      onChange={(e) =>
+                        updateSetField(exIndex, idx, {
+                          weightKg: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="fl-stepper-btn"
+                      aria-label="Aumentar carga"
+                      onClick={() =>
+                        updateSetField(exIndex, idx, {
+                          weightKg: set.weightKg + template.loadIncrementKg,
+                        })
+                      }
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <div className="fl-stepper">
+                    <button
+                      type="button"
+                      className="fl-stepper-btn"
+                      aria-label="Diminuir repetições"
+                      onClick={() =>
+                        updateSetField(exIndex, idx, { reps: Math.max(0, set.reps - 1) })
+                      }
+                    >
+                      −
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      aria-label="Repetições"
+                      className="fl-stepper-val"
+                      value={set.reps}
+                      onChange={(e) =>
+                        updateSetField(exIndex, idx, {
+                          reps: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="fl-stepper-btn"
+                      aria-label="Aumentar repetições"
+                      onClick={() => updateSetField(exIndex, idx, { reps: set.reps + 1 })}
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  {showRirColumn && (
+                    <span style={{ textAlign: 'center', fontSize: 11, color: 'var(--ink-tertiary)' }}>
+                      —
+                    </span>
+                  )}
+
+                  <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.88 }}
+                    aria-label={set.completed ? 'Desmarcar série concluída' : 'Marcar série concluída'}
+                    aria-pressed={set.completed}
+                    className={`fl-check-circle ${set.completed ? 'warmup-done' : ''}`}
+                    onClick={() => toggleSetComplete(exIndex, idx, template, partnerBOrderLabel)}
+                  >
+                    <Check size={19} strokeWidth={2.8} />
+                  </motion.button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Séries Válidas */}
+        <div style={{ marginTop: 16 }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: gridCols,
+              gap: 8,
+              padding: '0 10px 6px 12px',
+              fontSize: 10.5,
+              fontWeight: 600,
+              letterSpacing: '0.07em',
+              textTransform: 'uppercase',
+              color: 'var(--ink-tertiary)',
+              textAlign: 'center',
+            }}
+          >
+            <span>Série</span>
+            <span>{template.isIsometric ? 'Extra kg' : 'Carga kg'}</span>
+            <span>{template.isIsometric ? 'Tempo' : 'Reps'}</span>
+            {showRirColumn && <span>RIR</span>}
+            <span>OK</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {workingSets.map(({ set, idx }, validPos) => {
+              const prevComparable = prevLog?.validSets[validPos];
+              return (
+                <div
+                  key={set.id}
+                  className={`fl-set-row ${set.completed ? 'done' : ''} ${
+                    set.prTypes?.length ? 'pr' : ''
+                  }`}
+                  style={{ gridTemplateColumns: gridCols }}
+                >
+                  {/* Número + ghost anterior clicável */}
+                  <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <span
+                      className="t-mono"
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: set.completed ? 'var(--volt)' : 'var(--ink-secondary)',
+                      }}
+                    >
+                      {validPos + 1}
+                    </span>
+                    {set.prTypes?.length ? (
+                      <Trophy size={11} color="var(--volt)" />
+                    ) : prevComparable ? (
                       <button
                         type="button"
+                        title="Copiar carga e reps do treino anterior"
                         onClick={() =>
                           updateSetField(
                             exIndex,
-                            setIdx,
-                            {
-                              weightKg: prevComparableSet.weightKg,
-                              reps: prevComparableSet.reps,
-                            },
+                            idx,
+                            { weightKg: prevComparable.weightKg, reps: prevComparable.reps },
                             isFirstExercise ? template.loadIncrementKg : undefined,
                           )
                         }
-                        title="Toque para copiar carga e reps do último treino"
-                        style={{ color: 'var(--text-muted)', fontSize: 10.5, textAlign: 'left' }}
+                        className="t-mono"
+                        style={{
+                          fontSize: 9.5,
+                          color: 'var(--ink-tertiary)',
+                          lineHeight: 1,
+                        }}
                       >
-                        Anterior:{' '}
-                        <strong className="font-mono" style={{ color: 'var(--text-secondary)', textDecoration: 'underline dotted' }}>
-                          {formatKg(prevComparableSet.weightKg)} kg × {prevComparableSet.reps}
-                          {template.isIsometric ? 's' : ''}
-                        </strong>
-                        {typeof prevComparableSet.rir === 'number' && ` · RIR ${prevComparableSet.rir}`}
+                        {formatKg(prevComparable.weightKg)}×{prevComparable.reps}
                       </button>
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>
-                        Série válida {currentValidNumber}
-                      </span>
-                    )}
-
-                    {set.prTypes && set.prTypes.length > 0 && (
-                      <span className="pill pill-volt" style={{ padding: '1px 6px', fontSize: 10 }}>
-                        <Trophy size={10} /> PR!
-                      </span>
-                    )}
+                    ) : null}
                   </div>
 
-                  {log.sets.length > 1 && (
+                  {/* Carga */}
+                  <div className="fl-stepper">
                     <button
                       type="button"
-                      onClick={() => removeSetFromExercise(exIndex, setIdx)}
-                      aria-label="Remover série"
-                      style={{ color: 'var(--text-muted)', padding: '2px 4px' }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  )}
-                </div>
-
-                <div
-                  className={`set-row ${set.isWarmup ? 'is-warmup' : ''} ${set.completed ? 'is-completed' : ''} ${set.prTypes && set.prTypes.length > 0 ? 'is-pr-row' : ''}`}
-                  style={{
-                    gridTemplateColumns: showRirColumn
-                      ? '36px 1fr 1fr 44px 44px'
-                      : '36px 1fr 1fr 44px',
-                  }}
-                >
-                  {/* Índice ou tag AQ */}
-                  <div style={{ textAlign: 'center' }}>
-                    {set.isWarmup ? (
-                      <span
-                        className="font-mono"
-                        style={{
-                          display: 'inline-block',
-                          fontSize: 10,
-                          fontWeight: 800,
-                          padding: '3px 5px',
-                          borderRadius: 6,
-                          background: 'rgba(245, 158, 11, 0.22)',
-                          color: '#FCD34D',
-                        }}
-                      >
-                        AQ
-                      </span>
-                    ) : (
-                      <span
-                        className="font-mono"
-                        style={{
-                          fontWeight: 800,
-                          fontSize: 14,
-                          color: set.completed ? 'var(--accent-volt)' : 'var(--text-secondary)',
-                        }}
-                      >
-                        {currentValidNumber}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Stepper de Carga */}
-                  <div className="stepper-cell">
-                    <button
-                      type="button"
-                      className="stepper-btn"
+                      className="fl-stepper-btn"
                       aria-label="Diminuir carga"
                       onClick={() =>
                         updateSetField(
                           exIndex,
-                          setIdx,
+                          idx,
                           {
-                            weightKg: Math.max(0, Number((set.weightKg - template.loadIncrementKg).toFixed(1))),
+                            weightKg: Math.max(
+                              0,
+                              Number((set.weightKg - template.loadIncrementKg).toFixed(1)),
+                            ),
                           },
                           isFirstExercise ? template.loadIncrementKg : undefined,
                         )
@@ -834,27 +861,25 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
                       step="0.5"
                       min="0"
                       aria-label="Carga em kg"
-                      className="stepper-input"
+                      className="fl-stepper-val"
                       value={set.weightKg}
                       onChange={(e) =>
                         updateSetField(
                           exIndex,
-                          setIdx,
-                          {
-                            weightKg: Math.max(0, Number(e.target.value) || 0),
-                          },
+                          idx,
+                          { weightKg: Math.max(0, Number(e.target.value) || 0) },
                           isFirstExercise ? template.loadIncrementKg : undefined,
                         )
                       }
                     />
                     <button
                       type="button"
-                      className="stepper-btn"
+                      className="fl-stepper-btn"
                       aria-label="Aumentar carga"
                       onClick={() =>
                         updateSetField(
                           exIndex,
-                          setIdx,
+                          idx,
                           {
                             weightKg: Number((set.weightKg + template.loadIncrementKg).toFixed(1)),
                           },
@@ -866,36 +891,32 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
                     </button>
                   </div>
 
-                  {/* Stepper de Reps OU Cronômetro Isométrico */}
+                  {/* Reps ou Isométrico */}
                   {template.isIsometric ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
                       <IsometricTimerInline
                         targetMinSec={template.repMin}
                         targetMaxSec={template.repMax}
                         currentSeconds={set.reps}
                         soundEnabled={soundEnabled}
                         vibrationEnabled={vibrationEnabled}
-                        onChangeSeconds={(sec) =>
-                          updateSetField(exIndex, setIdx, { reps: sec })
-                        }
+                        onChangeSeconds={(sec) => updateSetField(exIndex, idx, { reps: sec })}
                         onFinishTarget={(sec) => {
-                          updateSetField(exIndex, setIdx, { reps: sec });
+                          updateSetField(exIndex, idx, { reps: sec });
                           if (!set.completed) {
-                            toggleSetComplete(exIndex, setIdx, template, partnerBOrderLabel);
+                            toggleSetComplete(exIndex, idx, template, partnerBOrderLabel);
                           }
                         }}
                       />
                     </div>
                   ) : (
-                    <div className="stepper-cell">
+                    <div className="fl-stepper">
                       <button
                         type="button"
-                        className="stepper-btn"
+                        className="fl-stepper-btn"
                         aria-label="Diminuir repetições"
                         onClick={() =>
-                          updateSetField(exIndex, setIdx, {
-                            reps: Math.max(0, set.reps - 1),
-                          })
+                          updateSetField(exIndex, idx, { reps: Math.max(0, set.reps - 1) })
                         }
                       >
                         −
@@ -905,598 +926,657 @@ export const ActiveWorkoutView: React.FC<ActiveWorkoutViewProps> = ({
                         inputMode="numeric"
                         min="0"
                         aria-label="Repetições"
-                        className="stepper-input"
+                        className="fl-stepper-val"
                         value={set.reps}
                         onChange={(e) =>
-                          updateSetField(exIndex, setIdx, {
+                          updateSetField(exIndex, idx, {
                             reps: Math.max(0, Math.floor(Number(e.target.value) || 0)),
                           })
                         }
                       />
                       <button
                         type="button"
-                        className="stepper-btn"
+                        className="fl-stepper-btn"
                         aria-label="Aumentar repetições"
-                        onClick={() =>
-                          updateSetField(exIndex, setIdx, {
-                            reps: set.reps + 1,
-                          })
-                        }
+                        onClick={() => updateSetField(exIndex, idx, { reps: set.reps + 1 })}
                       >
                         +
                       </button>
                     </div>
                   )}
 
-                  {/* RIR opcional (toque cíclico 1 mão: - → 0 → 1 → 2 → 3 → 4) */}
+                  {/* RIR */}
                   {showRirColumn && (
                     <button
                       type="button"
-                      disabled={set.isWarmup}
+                      aria-label="Definir RIR"
                       onClick={() => {
                         const cycle: (number | null)[] = [null, 0, 1, 2, 3, 4];
-                        const curIdx = cycle.indexOf(set.rir ?? null);
-                        const nextRir = cycle[(curIdx + 1) % cycle.length];
-                        updateSetField(exIndex, setIdx, { rir: nextRir });
+                        const nextRir = cycle[(cycle.indexOf(set.rir ?? null) + 1) % cycle.length];
+                        updateSetField(exIndex, idx, { rir: nextRir });
                       }}
-                      aria-label="Definir RIR"
+                      className="t-mono"
                       style={{
-                        height: 42,
-                        borderRadius: 10,
-                        border: '1px solid var(--border-subtle)',
+                        height: 44,
+                        borderRadius: 12,
                         background:
                           typeof set.rir === 'number'
                             ? set.rir === 0
-                              ? 'rgba(244, 63, 94, 0.22)'
-                              : set.rir <= 2
-                                ? 'rgba(200, 255, 46, 0.14)'
-                                : 'rgba(34, 211, 238, 0.14)'
-                            : '#0A0D12',
-                        fontFamily: 'var(--font-mono)',
+                              ? 'var(--rose-soft)'
+                              : 'var(--bg-canvas)'
+                            : 'var(--bg-canvas)',
+                        border: '1px solid var(--hairline)',
+                        fontSize: 12.5,
                         fontWeight: 700,
-                        fontSize: 13,
                         color:
-                          set.isWarmup
-                            ? 'var(--text-muted)'
-                            : typeof set.rir === 'number'
-                              ? 'var(--text-primary)'
-                              : 'var(--text-muted)',
-                        opacity: set.isWarmup ? 0.35 : 1,
+                          typeof set.rir === 'number' ? 'var(--ink-primary)' : 'var(--ink-tertiary)',
                       }}
                     >
-                      {set.isWarmup ? '—' : typeof set.rir === 'number' ? set.rir : 'RIR'}
+                      {typeof set.rir === 'number' ? set.rir : '–'}
                     </button>
                   )}
 
-                  {/* Botão concluir série (zona do polegar direito) */}
-                  <button
+                  {/* Checkmark circular */}
+                  <motion.button
                     type="button"
+                    whileTap={{ scale: 0.86 }}
+                    transition={SPRING_SNAPPY}
                     aria-label={set.completed ? 'Desmarcar série concluída' : 'Marcar série concluída'}
                     aria-pressed={set.completed}
-                    className={`set-check-btn ${
-                      set.completed
-                        ? set.isWarmup
-                          ? 'warmup-checked'
-                          : 'checked'
-                        : ''
-                    }`}
-                    onClick={() =>
-                      toggleSetComplete(exIndex, setIdx, template, partnerBOrderLabel)
-                    }
+                    className={`fl-check-circle ${set.completed ? 'done' : ''}`}
+                    onClick={() => toggleSetComplete(exIndex, idx, template, partnerBOrderLabel)}
                   >
-                    <Check size={20} strokeWidth={3} />
-                  </button>
+                    <Check size={19} strokeWidth={2.8} />
+                  </motion.button>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Rodapé do card: + Série válida / + Aquecimento */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-xs"
-            style={{ flex: 1 }}
-            onClick={() => addSetToExercise(exIndex, false)}
-          >
-            <Plus size={13} /> Série extra
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs"
-            onClick={() => addSetToExercise(exIndex, true)}
-          >
-            <Flame size={12} color="#F59E0B" /> + Aquec.
-          </button>
+        {/* Rodapé minimalista: + Série / Remover última */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="fl-btn fl-btn-ghost fl-btn-xs"
+              onClick={() => addSetToExercise(exIndex, false)}
+            >
+              <Plus size={13} /> Série
+            </button>
+            <button
+              type="button"
+              className="fl-btn fl-btn-ghost fl-btn-xs"
+              onClick={() => addSetToExercise(exIndex, true)}
+            >
+              <Flame size={12} color="var(--amber)" /> Aquec.
+            </button>
+          </div>
+          {log.sets.length > 1 && (
+            <button
+              type="button"
+              className="fl-btn fl-btn-ghost fl-btn-xs"
+              style={{ color: 'var(--ink-tertiary)' }}
+              aria-label="Remover última série"
+              onClick={() => removeSetFromExercise(exIndex, log.sets.length - 1)}
+            >
+              <Trash2 size={12} /> Remover
+            </button>
+          )}
         </div>
       </div>
     );
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Barra viva da sessão em andamento */}
-      <div className="card card-volt" style={{ padding: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <span className="pill pill-volt">
-                <span className="live-dot" /> EM ANDAMENTO
-              </span>
-              <span className="pill font-mono">{dayTemplate.shortDay}</span>
-            </div>
-            <h2 className="font-display" style={{ margin: 0, fontSize: 26, lineHeight: 1.05 }}>
-              {dayTemplate.title}
-            </h2>
-            <p style={{ margin: '2px 0 0', fontSize: 12.5, color: 'var(--text-secondary)' }}>
-              {dayTemplate.subtitle}
-            </p>
-          </div>
+  const renderStation = (block: StationBlock) => {
+    if (block.kind === 'single') {
+      return renderExerciseSurface(block.index, block.log, block.template);
+    }
 
-          <div style={{ textAlign: 'right' }}>
-            <div className="section-label">Duração</div>
-            <div
-              className="font-mono"
-              style={{ fontSize: 26, fontWeight: 800, color: 'var(--accent-volt)', lineHeight: 1.1 }}
-            >
-              {formatDuration(elapsedSec)}
-            </div>
-          </div>
-        </div>
+    if (block.kind === 'biset') {
+      const roundsTotal = Math.max(
+        block.logA.sets.filter((s) => !s.isWarmup).length,
+        block.logB.sets.filter((s) => !s.isWarmup).length,
+      );
+      const roundsDone = Math.min(
+        block.logA.sets.filter((s) => !s.isWarmup && s.completed).length,
+        block.logB.sets.filter((s) => !s.isWarmup && s.completed).length,
+      );
 
-        {/* Métricas em tempo real */}
-        <div className="grid-3" style={{ marginTop: 12 }}>
-          <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-            <div className="section-label">Séries válidas</div>
-            <div className="font-mono" style={{ fontSize: 17, fontWeight: 800, marginTop: 2 }}>
-              {liveStats.completedValid}/{liveStats.plannedValid}
-            </div>
-          </div>
-          <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-            <div className="section-label">Tonelagem</div>
-            <div className="font-mono" style={{ fontSize: 17, fontWeight: 800, marginTop: 2, color: 'var(--accent-cyan)' }}>
-              {liveStats.tonnage.toLocaleString('pt-BR')} kg
-            </div>
-          </div>
-          <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-            <div className="section-label">Recordes PR</div>
-            <div className="font-mono" style={{ fontSize: 17, fontWeight: 800, marginTop: 2, color: 'var(--accent-volt)' }}>
-              {liveStats.prs}
-            </div>
-          </div>
-        </div>
-
-        {/* Barra de progresso da sessão */}
+      return (
         <div
+          key={block.group}
+          data-testid={`biset-${block.group}`}
           style={{
-            height: 6,
-            background: 'rgba(255,255,255,0.08)',
-            borderRadius: 99,
-            overflow: 'hidden',
-            marginTop: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            padding: 10,
+            borderRadius: 28,
+            background: 'rgba(255, 98, 46, 0.05)',
+            border: '1px solid var(--ember-border)',
           }}
         >
           <div
             style={{
-              height: '100%',
-              width: `${liveStats.plannedValid > 0 ? Math.min(100, (liveStats.completedValid / liveStats.plannedValid) * 100) : 0}%`,
-              background: 'linear-gradient(90deg, #C8FF2E, #22D3EE)',
-              transition: 'width 0.25s ease',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '4px 8px 0',
             }}
-          />
-        </div>
-
-        {/* Controles rápidos de academia: Tela Ativa + Timer Manual + Anilhas */}
-        <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-          <button
-            type="button"
-            className={`btn btn-xs ${wakeLockEnabled ? 'btn-secondary' : 'btn-ghost'}`}
-            style={{
-              flex: 1,
-              borderColor: wakeLockActive ? 'var(--border-volt)' : undefined,
-              color: wakeLockActive ? 'var(--accent-volt)' : undefined,
-            }}
-            onClick={onToggleWakeLock}
           >
-            <Sun size={13} />
-            {wakeLockSupported
-              ? wakeLockActive
-                ? 'Tela ativa: ON'
-                : wakeLockEnabled
-                  ? 'Tela: pronta'
-                  : 'Tela: OFF'
-              : 'Tela ativa'}
-          </button>
-          <button
-            type="button"
-            className={`btn btn-xs ${showQuickTimer ? 'btn-ember' : 'btn-secondary'}`}
-            onClick={() => setShowQuickTimer((v) => !v)}
-          >
-            Timer
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-xs"
-            onClick={() => onOpenPlateCalc(60, 'Calculadora rápida', 20)}
-          >
-            <Disc size={13} /> Anilhas
-          </button>
-        </div>
-
-        {/* Presets rápidos de descanso manual */}
-        {showQuickTimer && (
-          <div className="grid-4" style={{ marginTop: 8 }}>
-            {[60, 90, 120, 180].map((sec) => (
-              <button
-                key={sec}
-                type="button"
-                className="btn btn-ghost btn-xs font-mono"
-                onClick={() => {
-                  const now = Date.now();
-                  onStartRestTimer({
-                    exerciseName: 'Descanso manual',
-                    durationSeconds: sec,
-                    remainingSeconds: sec,
-                    startedAt: now,
-                    endsAt: now + sec * 1000,
-                    paused: false,
-                  });
-                  setShowQuickTimer(false);
-                }}
-              >
-                {sec >= 120 ? `${sec / 60} min` : `${sec} s`}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Faixa de salto rápido entre exercícios (ergonomia 1 mão) */}
-        <div className="jump-strip" style={{ marginTop: 10 }} aria-label="Atalho rápido de exercícios">
-          {blocks.map((block) => {
-            if (block.kind === 'single') {
-              const valid = block.log.sets.filter((s) => !s.isWarmup);
-              const doneCount = valid.filter((s) => s.completed).length;
-              const statusClass =
-                valid.length > 0 && doneCount === valid.length
-                  ? 'done'
-                  : doneCount > 0
-                    ? 'partial'
-                    : '';
-              return (
-                <button
-                  key={block.log.exerciseId}
-                  type="button"
-                  className={`jump-chip ${statusClass}`}
-                  onClick={() =>
-                    document
-                      .getElementById(`exercise-card-${block.log.exerciseId}`)
-                      ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                  }
-                >
-                  {block.template.orderLabel}
-                  {statusClass === 'done' ? ' ✓' : ` (${doneCount}/${valid.length})`}
-                </button>
-              );
-            }
-            const validA = block.logA.sets.filter((s) => !s.isWarmup);
-            const validB = block.logB.sets.filter((s) => !s.isWarmup);
-            const doneTotal =
-              validA.filter((s) => s.completed).length +
-              validB.filter((s) => s.completed).length;
-            const totalAll = validA.length + validB.length;
-            const statusClass =
-              totalAll > 0 && doneTotal === totalAll
-                ? 'done'
-                : doneTotal > 0
-                  ? 'partial'
-                  : '';
-            return (
-              <button
-                key={block.group}
-                type="button"
-                className={`jump-chip ${statusClass}`}
-                onClick={() =>
-                  document
-                    .getElementById(`exercise-card-${block.logA.exerciseId}`)
-                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }
-              >
-                {block.templateA.orderLabel}+{block.templateB.orderLabel}
-                {statusClass === 'done' ? ' ✓' : ''}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Lista de exercícios (simples e Bisets agrupados visualmente) */}
-      {blocks.map((block) => {
-        if (block.kind === 'single') {
-          return renderExerciseCard(block.index, block.log, block.template);
-        }
-
-        const roundsTotal = Math.max(
-          block.logA.sets.filter((s) => !s.isWarmup).length,
-          block.logB.sets.filter((s) => !s.isWarmup).length,
-        );
-        const roundsDone = Math.min(
-          block.logA.sets.filter((s) => !s.isWarmup && s.completed).length,
-          block.logB.sets.filter((s) => !s.isWarmup && s.completed).length,
-        );
-
-        return (
-          <div key={block.group} className="biset-wrapper" data-testid={`biset-${block.group}`}>
-            <div className="biset-header">
-              <span className="biset-badge">
-                <Link2 size={13} />
-                Biset {block.templateA.orderLabel} + {block.templateB.orderLabel} · Rodada {Math.min(roundsDone + 1, roundsTotal)}/{roundsTotal}
-              </span>
-              <span style={{ fontSize: 11, color: '#FF9C6E', fontWeight: 600 }}>
-                Descanso só após {block.templateB.orderLabel} ({block.templateB.restLabel})
-              </span>
-            </div>
-
-            {renderExerciseCard(
-              block.indexA,
-              block.logA,
-              block.templateA,
-              block.templateB.orderLabel,
-            )}
-
-            <div className="biset-bridge">
-              <ArrowDown size={13} />
-              Sem descanso — faça direto o {block.templateB.orderLabel}
-              <ArrowDown size={13} />
-            </div>
-
-            {renderExerciseCard(block.indexB, block.logB, block.templateB)}
-          </div>
-        );
-      })}
-
-      {/* Bloco de Cardio Pós-Treino */}
-      <div className={`card ${dayTemplate.cardio.enabled ? 'card-ember' : ''}`}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <HeartPulse size={20} color={dayTemplate.cardio.enabled ? '#FF8B57' : '#66758D'} />
-            <div>
-              <h3 className="font-display" style={{ margin: 0, fontSize: 20 }}>
-                Cardio Pós-Treino
-              </h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                {dayTemplate.cardio.label}
-              </p>
-            </div>
-          </div>
-          {dayTemplate.cardio.enabled && (
-            <span className={`pill ${dayTemplate.cardio.optional ? 'pill-cyan' : 'pill-ember'}`}>
-              {dayTemplate.cardio.optional ? 'Opcional' : 'Meta do dia'}
+            <span className="fl-pill fl-pill-ember">
+              <Link2 size={12} /> Biset {block.templateA.orderLabel} + {block.templateB.orderLabel} · Rodada{' '}
+              {Math.min(roundsDone + 1, roundsTotal)}/{roundsTotal}
             </span>
+            <span style={{ fontSize: 11, color: '#ff9c7a' }}>
+              Descanso só após {block.templateB.orderLabel}
+            </span>
+          </div>
+
+          {renderExerciseSurface(
+            block.indexA,
+            block.logA,
+            block.templateA,
+            block.templateB.orderLabel,
           )}
+          {renderExerciseSurface(block.indexB, block.logB, block.templateB)}
         </div>
+      );
+    }
 
-        <p style={{ margin: '8px 0 10px', fontSize: 12.5, color: 'var(--text-secondary)' }}>
-          {dayTemplate.cardio.details}
-        </p>
+    // Estação dedicada de Cardio Pós-Treino
+    return (
+      <div className="fl-card" style={{ padding: 20 }}>
+        <div className="t-kicker" style={{ color: '#ff8c66' }}>
+          Finalização · Déficit Calórico
+        </div>
+        <h2 className="t-title" style={{ marginTop: 4 }}>
+          Cardio Pós-Treino
+        </h2>
+        <p className="t-subtitle">{dayTemplate.cardio.label}</p>
 
-        {dayTemplate.cardio.enabled && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* Cronômetro vivo de cardio */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                background: '#0A0D12',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 12,
-                padding: '9px 12px',
-              }}
-            >
-              <div>
-                <div className="section-label">Cronômetro de cardio</div>
-                <div className="font-mono" style={{ fontSize: 22, fontWeight: 800, color: '#FF8B57' }}>
-                  {formatDuration(cardioTimerSec)}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  type="button"
-                  className={`btn btn-xs ${cardioTimerRunning ? 'btn-ember' : 'btn-secondary'}`}
-                  onClick={() => setCardioTimerRunning((r) => !r)}
-                >
-                  {cardioTimerRunning ? <Pause size={13} /> : <Play size={13} />}
-                  {cardioTimerRunning ? 'Pausar' : 'Iniciar'}
-                </button>
-                {cardioTimerSec > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-xs"
-                    onClick={() => {
-                      setCardioTimerRunning(false);
-                      const mins = Math.max(1, Math.round(cardioTimerSec / 60));
-                      updateCardio({ minutes: mins, completed: true });
-                      onShowToast(`Cardio de ${mins} min registrado!`, 'info');
-                    }}
-                  >
-                    Salvar {Math.max(1, Math.round(cardioTimerSec / 60))}m
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="grid-3">
-              <div>
-                <label className="section-label" htmlFor="cardio-min">Minutos</label>
-                <input
-                  id="cardio-min"
-                  type="number"
-                  inputMode="numeric"
-                  className="input input-compact"
-                  style={{ marginTop: 4 }}
-                  value={draft.cardio?.minutes ?? dayTemplate.cardio.targetMinutesMin}
-                  onChange={(e) =>
-                    updateCardio({ minutes: Math.max(0, Number(e.target.value) || 0) })
-                  }
-                />
-              </div>
-              <div>
-                <label className="section-label" htmlFor="cardio-dist">Dist. (km)</label>
-                <input
-                  id="cardio-dist"
-                  type="number"
-                  step="0.1"
-                  inputMode="decimal"
-                  className="input input-compact"
-                  style={{ marginTop: 4 }}
-                  placeholder="Ex: 1.8"
-                  value={draft.cardio?.distanceKm ?? ''}
-                  onChange={(e) =>
-                    updateCardio({
-                      distanceKm: e.target.value ? Number(e.target.value) : undefined,
-                    })
-                  }
-                />
-              </div>
-              <div>
-                <label className="section-label" htmlFor="cardio-speed">Vel. (km/h)</label>
-                <input
-                  id="cardio-speed"
-                  type="number"
-                  step="0.5"
-                  inputMode="decimal"
-                  className="input input-compact"
-                  style={{ marginTop: 4 }}
-                  placeholder="5.5"
-                  value={draft.cardio?.speedKmh ?? ''}
-                  onChange={(e) =>
-                    updateCardio({
-                      speedKmh: e.target.value ? Number(e.target.value) : undefined,
-                    })
-                  }
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="section-label" htmlFor="cardio-mod">Modalidade</label>
-              <input
-                id="cardio-mod"
-                className="input"
-                style={{ marginTop: 4 }}
-                value={draft.cardio?.modality ?? dayTemplate.cardio.modalitySuggestion}
-                onChange={(e) => updateCardio({ modality: e.target.value })}
-              />
-            </div>
-
+        <div
+          style={{
+            marginTop: 18,
+            padding: 18,
+            borderRadius: 18,
+            background: 'var(--bg-canvas)',
+            border: '1px solid var(--hairline)',
+            textAlign: 'center',
+          }}
+        >
+          <div className="t-kicker">Cronômetro</div>
+          <div className="t-mono" style={{ fontSize: 42, fontWeight: 700, margin: '6px 0 14px', color: '#ff8c66' }}>
+            {formatDuration(cardioTimerSec)}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
             <button
               type="button"
-              className={`btn btn-sm btn-block ${draft.cardio?.completed ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => updateCardio({ completed: !draft.cardio?.completed })}
+              className={`fl-btn fl-btn-sm ${cardioTimerRunning ? 'fl-btn-ember' : 'fl-btn-surface'}`}
+              onClick={() => setCardioTimerRunning((r) => !r)}
             >
-              <Activity size={15} />
-              {draft.cardio?.completed ? 'Cardio Concluído ✓' : 'Marcar Cardio como Concluído'}
+              {cardioTimerRunning ? <Pause size={15} /> : <Play size={15} />}
+              {cardioTimerRunning ? 'Pausar' : 'Iniciar'}
             </button>
+            {cardioTimerSec > 0 && (
+              <button
+                type="button"
+                className="fl-btn fl-btn-volt fl-btn-sm"
+                onClick={() => {
+                  setCardioTimerRunning(false);
+                  const mins = Math.max(1, Math.round(cardioTimerSec / 60));
+                  updateCardio({ minutes: mins, completed: true });
+                  onShowToast(`Cardio de ${mins} min registrado!`, 'info');
+                }}
+              >
+                Salvar {Math.max(1, Math.round(cardioTimerSec / 60))} min
+              </button>
+            )}
           </div>
-        )}
+        </div>
+
+        <div className="fl-grid-2" style={{ marginTop: 14 }}>
+          <div>
+            <label className="t-kicker" htmlFor="c-min">Minutos</label>
+            <input
+              id="c-min"
+              type="number"
+              className="fl-input t-mono"
+              style={{ marginTop: 6, textAlign: 'center', fontWeight: 700 }}
+              value={draft.cardio?.minutes ?? dayTemplate.cardio.targetMinutesMin}
+              onChange={(e) =>
+                updateCardio({ minutes: Math.max(0, Number(e.target.value) || 0) })
+              }
+            />
+          </div>
+          <div>
+            <label className="t-kicker" htmlFor="c-dist">Distância (km)</label>
+            <input
+              id="c-dist"
+              type="number"
+              step="0.1"
+              className="fl-input t-mono"
+              style={{ marginTop: 6, textAlign: 'center', fontWeight: 700 }}
+              placeholder="1.8"
+              value={draft.cardio?.distanceKm ?? ''}
+              onChange={(e) =>
+                updateCardio({ distanceKm: e.target.value ? Number(e.target.value) : undefined })
+              }
+            />
+          </div>
+        </div>
+
+        <button
+          type="button"
+          className={`fl-btn fl-btn-block ${draft.cardio?.completed ? 'fl-btn-volt' : 'fl-btn-surface'}`}
+          style={{ marginTop: 16 }}
+          onClick={() => updateCardio({ completed: !draft.cardio?.completed })}
+        >
+          <Activity size={17} />
+          {draft.cardio?.completed ? 'Cardio Concluído ✓' : 'Marcar Cardio como Concluído'}
+        </button>
+      </div>
+    );
+  };
+
+  const progressPct =
+    liveStats.plannedValid > 0
+      ? Math.min(100, (liveStats.completedValid / liveStats.plannedValid) * 100)
+      : 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Barra superior minimalista da sessão */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span className="fl-live-dot" />
+            <span className="t-mono" style={{ fontSize: 15, fontWeight: 700 }}>
+              {formatDuration(elapsedSec)}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>·</span>
+            <span className="t-mono" style={{ fontSize: 12.5, color: 'var(--ink-secondary)' }}>
+              {liveStats.completedValid}/{liveStats.plannedValid}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-tertiary)', marginTop: 2 }}>
+            {dayTemplate.title} · {liveStats.tonnage.toLocaleString('pt-BR')} kg
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            className={`fl-icon-btn ${wakeLockActive || wakeLockEnabled ? 'active' : ''}`}
+            onClick={onToggleWakeLock}
+            title={
+              wakeLockSupported
+                ? wakeLockActive
+                  ? 'Tela sempre ativa: ligada'
+                  : 'Tela sempre ativa'
+                : 'Wake Lock não suportado'
+            }
+            aria-label="Alternar tela sempre ativa"
+          >
+            <Sun size={17} />
+          </button>
+          <button
+            type="button"
+            className={`fl-icon-btn ${mapSheetOpen ? 'active' : ''}`}
+            onClick={() => setMapSheetOpen(true)}
+            title="Mapa da sessão e timer manual"
+            aria-label="Abrir mapa da sessão"
+          >
+            <ListChecks size={17} />
+          </button>
+          <button
+            type="button"
+            className="fl-btn fl-btn-volt fl-btn-xs"
+            style={{ minHeight: 40, padding: '0 14px' }}
+            onClick={() => setFinishSheetOpen(true)}
+          >
+            Finalizar
+          </button>
+        </div>
       </div>
 
-      {/* Notas gerais da sessão */}
-      <div className="card">
-        <label className="section-label" htmlFor="session-notes-field">
-          Anotações da sessão (energia, sono, pump, articulações)
-        </label>
-        <textarea
-          id="session-notes-field"
-          className="input"
-          rows={2}
-          style={{ marginTop: 6, resize: 'vertical' }}
-          placeholder="Ex.: Dormi 7h, força ótima no supino, leve fadiga no final..."
-          value={draft.notes}
-          onChange={(e) => onUpdateDraft((prev) => ({ ...prev, notes: e.target.value }))}
+      {/* Barra fina de progresso total */}
+      <div
+        style={{
+          height: 3,
+          borderRadius: 99,
+          background: 'rgba(255,255,255,0.07)',
+          overflow: 'hidden',
+        }}
+      >
+        <motion.div
+          style={{ height: '100%', background: 'var(--volt)' }}
+          animate={{ width: `${progressPct}%` }}
+          transition={{ duration: 0.3 }}
         />
       </div>
 
-      {/* Ações finais da sessão */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {!confirmPartialFinish ? (
+      {/* Área principal: Foco (1 estação animada por vez) OU Visão Completa */}
+      {viewMode === 'focus' ? (
+        <AnimatePresence mode="wait">
+          <SubScreenSlide
+            screenKey={`station-${safeStationIdx}`}
+            direction={slideDir}
+          >
+            {currentStation && renderStation(currentStation)}
+          </SubScreenSlide>
+        </AnimatePresence>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {stations.map((st, idx) => (
+            <div key={idx}>{renderStation(st)}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Barra inferior de navegação entre estações (modo foco — 1 mão!) */}
+      {viewMode === 'focus' && (
+        <div className="fl-station-bar">
           <button
             type="button"
-            className="btn btn-primary btn-block"
-            style={{ minHeight: 54, fontSize: 16 }}
-            onClick={() => {
-              if (liveStats.completedValid > 0 && liveStats.completedValid < liveStats.plannedValid) {
-                setConfirmPartialFinish(true);
-              } else {
-                onFinishWorkout();
-              }
+            className="fl-icon-btn"
+            style={{ width: 48, height: 42, borderRadius: 14 }}
+            disabled={safeStationIdx === 0}
+            onClick={() => goToStation(safeStationIdx - 1)}
+            aria-label="Estação anterior"
+          >
+            <ChevronLeft size={20} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMapSheetOpen(true)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: 42,
             }}
           >
-            <Check size={20} strokeWidth={3} />
-            Finalizar & Salvar Treino ({liveStats.completedValid}/{liveStats.plannedValid} séries válidas)
+            <span className="t-mono" style={{ fontSize: 12.5, fontWeight: 700 }}>
+              Estação {safeStationIdx + 1} / {stations.length}
+            </span>
+            <span style={{ fontSize: 10.5, color: 'var(--ink-tertiary)' }}>
+              Toque p/ ver todas · {viewMode === 'focus' ? 'Modo Foco' : 'Lista'}
+            </span>
           </button>
-        ) : (
-          <div className="card card-amber">
-            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#FEF3C7' }}>
-              Você concluiu <strong>{liveStats.completedValid}</strong> de{' '}
-              <strong>{liveStats.plannedValid}</strong> séries planejadas. Deseja salvar o treino agora
-              apenas com as séries concluídas?
-            </p>
-            <div className="grid-2">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setConfirmPartialFinish(false)}
-              >
-                Voltar às séries
+
+          {safeStationIdx < stations.length - 1 ? (
+            <button
+              type="button"
+              className="fl-btn fl-btn-volt"
+              style={{ width: 48, minHeight: 42, padding: 0, borderRadius: 14 }}
+              onClick={() => goToStation(safeStationIdx + 1)}
+              aria-label="Próxima estação"
+            >
+              <ChevronRight size={20} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="fl-btn fl-btn-volt"
+              style={{ width: 48, minHeight: 42, padding: 0, borderRadius: 14 }}
+              onClick={() => setFinishSheetOpen(true)}
+              aria-label="Finalizar treino"
+            >
+              <Check size={20} strokeWidth={2.8} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Sheet: Mapa da Sessão + Timer Manual + Alternar Foco/Lista */}
+      <AnimatePresence>
+        {mapSheetOpen && (
+          <SheetModal ariaLabel="Mapa da sessão" onClose={() => setMapSheetOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div>
+                <div className="t-kicker">{dayTemplate.title}</div>
+                <h3 className="t-title" style={{ fontSize: 21, marginTop: 2 }}>
+                  Mapa da Sessão
+                </h3>
+              </div>
+              <button type="button" className="fl-icon-btn" onClick={() => setMapSheetOpen(false)} aria-label="Fechar">
+                <X size={18} />
               </button>
+            </div>
+
+            {/* Alternar Foco vs Lista */}
+            <div className="fl-grid-2" style={{ marginBottom: 14 }}>
               <button
                 type="button"
-                className="btn btn-primary btn-sm"
+                className={`fl-btn fl-btn-xs ${viewMode === 'focus' ? 'fl-btn-volt' : 'fl-btn-surface'}`}
                 onClick={() => {
-                  setConfirmPartialFinish(false);
-                  onFinishWorkout();
+                  setViewMode('focus');
+                  setMapSheetOpen(false);
                 }}
               >
-                Salvar assim mesmo
+                Modo Foco (1 por vez)
+              </button>
+              <button
+                type="button"
+                className={`fl-btn fl-btn-xs ${viewMode === 'all' ? 'fl-btn-volt' : 'fl-btn-surface'}`}
+                onClick={() => {
+                  setViewMode('all');
+                  setMapSheetOpen(false);
+                }}
+              >
+                Ver todas juntas
               </button>
             </div>
-          </div>
-        )}
 
-        {!confirmDiscard ? (
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-block"
-            onClick={() => setConfirmDiscard(true)}
-          >
-            Descartar treino em andamento
-          </button>
-        ) : (
-          <div className="card" style={{ borderColor: 'rgba(244,63,94,0.5)' }}>
-            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#FECDD3' }}>
-              Tem certeza que deseja descartar esta sessão sem salvar no histórico?
-            </p>
-            <div className="grid-2">
+            {/* Timer manual rápido */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="t-kicker" style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Timer size={12} /> Descanso manual rápido
+              </div>
+              <div className="fl-grid-4">
+                {[60, 90, 120, 180].map((sec) => (
+                  <button
+                    key={sec}
+                    type="button"
+                    className="fl-btn fl-btn-surface fl-btn-xs t-mono"
+                    onClick={() => {
+                      const now = Date.now();
+                      onStartRestTimer({
+                        exerciseName: 'Descanso manual',
+                        durationSeconds: sec,
+                        remainingSeconds: sec,
+                        startedAt: now,
+                        endsAt: now + sec * 1000,
+                        paused: false,
+                      });
+                      setMapSheetOpen(false);
+                    }}
+                  >
+                    {sec >= 120 ? `${sec / 60}m` : `${sec}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Lista clicável das estações */}
+            <div className="fl-list-group" style={{ marginBottom: 14 }}>
+              {stations.map((st, idx) => {
+                let title = 'Cardio Pós-Treino';
+                let badge = 'CARDIO';
+                let done = false;
+                let progress = '';
+                if (st.kind === 'single') {
+                  title = st.template.name;
+                  badge = st.template.orderLabel;
+                  const valid = st.log.sets.filter((s) => !s.isWarmup);
+                  const c = valid.filter((s) => s.completed).length;
+                  done = valid.length > 0 && c === valid.length;
+                  progress = `${c}/${valid.length}`;
+                } else if (st.kind === 'biset') {
+                  title = `${st.templateA.name} + ${st.templateB.name}`;
+                  badge = `${st.templateA.orderLabel}+${st.templateB.orderLabel}`;
+                  const vA = st.logA.sets.filter((s) => !s.isWarmup);
+                  const vB = st.logB.sets.filter((s) => !s.isWarmup);
+                  const c =
+                    vA.filter((s) => s.completed).length + vB.filter((s) => s.completed).length;
+                  const tot = vA.length + vB.length;
+                  done = tot > 0 && c === tot;
+                  progress = `${c}/${tot}`;
+                } else {
+                  done = Boolean(draft.cardio?.completed);
+                  progress = done ? 'OK' : `${dayTemplate.cardio.targetMinutesMin}m`;
+                }
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="fl-list-row"
+                    style={{
+                      padding: '12px 14px',
+                      background: idx === safeStationIdx ? 'rgba(204,255,0,0.06)' : undefined,
+                    }}
+                    onClick={() => {
+                      setViewMode('focus');
+                      goToStation(idx);
+                      setMapSheetOpen(false);
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      <span
+                        className="t-mono"
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: done ? 'var(--emerald)' : 'var(--volt)',
+                          width: 44,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {badge}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 13.5,
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {title}
+                      </span>
+                    </div>
+                    <span className="t-mono" style={{ fontSize: 11.5, color: done ? 'var(--emerald)' : 'var(--ink-tertiary)' }}>
+                      {done ? '✓' : progress}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setConfirmDiscard(false)}
+                className="fl-btn fl-btn-surface fl-btn-sm"
+                style={{ flex: 1 }}
+                onClick={() => {
+                  setMapSheetOpen(false);
+                  onOpenPlateCalc(60, 'Calculadora rápida', 20);
+                }}
               >
-                Continuar treinando
+                <Disc size={15} /> Anilhas
               </button>
               <button
                 type="button"
-                className="btn btn-danger btn-sm"
-                onClick={onDiscardWorkout}
+                className="fl-btn fl-btn-danger fl-btn-sm"
+                onClick={() => {
+                  setMapSheetOpen(false);
+                  onDiscardWorkout();
+                }}
               >
-                <RefreshCw size={14} /> Sim, descartar
+                Descartar
               </button>
             </div>
-          </div>
+          </SheetModal>
         )}
-      </div>
+      </AnimatePresence>
+
+      {/* Sheet: Finalizar Sessão (com notas + salvaguarda de séries pendentes) */}
+      <AnimatePresence>
+        {finishSheetOpen && (
+          <SheetModal ariaLabel="Finalizar sessão de treino" onClose={() => setFinishSheetOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div>
+                <div className="t-kicker">Encerrar sessão</div>
+                <h3 className="t-title" style={{ fontSize: 22, marginTop: 2 }}>
+                  Finalizar & Salvar Treino
+                </h3>
+              </div>
+              <button type="button" className="fl-icon-btn" onClick={() => setFinishSheetOpen(false)} aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="fl-grid-3" style={{ marginBottom: 14 }}>
+              <div className="fl-card fl-card-compact" style={{ textAlign: 'center' }}>
+                <div className="t-kicker">Séries</div>
+                <div className="t-mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4 }}>
+                  {liveStats.completedValid}/{liveStats.plannedValid}
+                </div>
+              </div>
+              <div className="fl-card fl-card-compact" style={{ textAlign: 'center' }}>
+                <div className="t-kicker">Tonelagem</div>
+                <div className="t-mono" style={{ fontSize: 16, fontWeight: 700, marginTop: 5, color: 'var(--cyan)' }}>
+                  {liveStats.tonnage.toLocaleString('pt-BR')}
+                </div>
+              </div>
+              <div className="fl-card fl-card-compact" style={{ textAlign: 'center' }}>
+                <div className="t-kicker">PRs</div>
+                <div className="t-mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 4, color: 'var(--volt)' }}>
+                  {liveStats.prs}
+                </div>
+              </div>
+            </div>
+
+            {liveStats.completedValid < liveStats.plannedValid && (
+              <p style={{ margin: '0 0 12px', fontSize: 12.5, color: '#fde68a' }}>
+                Há {liveStats.plannedValid - liveStats.completedValid} séries ainda não marcadas —
+                somente as séries concluídas serão contabilizadas.
+              </p>
+            )}
+
+            <label className="t-kicker" htmlFor="finish-notes">
+              Notas da sessão (opcional)
+            </label>
+            <textarea
+              id="finish-notes"
+              className="fl-input"
+              rows={2}
+              style={{ marginTop: 6, marginBottom: 16, resize: 'none' }}
+              placeholder="Sono, energia, pump ou observações..."
+              value={draft.notes}
+              onChange={(e) => onUpdateDraft((prev) => ({ ...prev, notes: e.target.value }))}
+            />
+
+            <button
+              type="button"
+              className="fl-btn fl-btn-volt fl-btn-block"
+              onClick={() => {
+                setFinishSheetOpen(false);
+                onFinishWorkout();
+              }}
+            >
+              <Check size={18} strokeWidth={2.8} />
+              Confirmar e Salvar Treino
+            </button>
+          </SheetModal>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

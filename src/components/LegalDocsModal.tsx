@@ -1,6 +1,7 @@
 import React from 'react';
-import { FileText, Shield, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { LEGAL_CONSENT_VERSION } from '../engines/storage';
+import { SegmentedControl, SheetModal } from './MotionPrimitives';
 
 interface LegalDocsModalProps {
   doc: 'privacy' | 'terms';
@@ -14,186 +15,99 @@ export const LegalDocsModal: React.FC<LegalDocsModalProps> = ({
   onClose,
 }) => {
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Documentos legais do FerroLab" style={{ zIndex: 90 }}>
-      <div className="modal-sheet">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {doc === 'privacy' ? <Shield size={20} color="#C8FF2E" /> : <FileText size={20} color="#22D3EE" />}
-            <div>
-              <h2 className="font-display" style={{ margin: 0, fontSize: 22 }}>
-                {doc === 'privacy' ? 'Política de Privacidade (LGPD)' : 'Termos de Uso & Aviso de Saúde'}
-              </h2>
-              <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                Versão {LEGAL_CONSENT_VERSION} · Legislação Brasileira
-              </span>
-            </div>
-          </div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Fechar">
-            <X size={18} />
-          </button>
+    <SheetModal ariaLabel="Documentos legais do FerroLab" onClose={onClose} zIndex={90}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+        <div>
+          <div className="t-kicker">Legislação Brasileira · v{LEGAL_CONSENT_VERSION}</div>
+          <h2 className="t-title" style={{ fontSize: 20, marginTop: 2 }}>
+            {doc === 'privacy' ? 'Política de Privacidade' : 'Termos de Uso'}
+          </h2>
         </div>
-
-        <div className="grid-2" style={{ marginBottom: 14 }}>
-          <button
-            type="button"
-            className={`btn btn-xs ${doc === 'privacy' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => onSwitchDoc('privacy')}
-          >
-            Política de Privacidade
-          </button>
-          <button
-            type="button"
-            className={`btn btn-xs ${doc === 'terms' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => onSwitchDoc('terms')}
-          >
-            Termos de Uso
-          </button>
-        </div>
-
-        {doc === 'privacy' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 11, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                1. Arquitetura 100% Local-First e Minimização de Dados
-              </h3>
-              <p style={{ margin: 0 }}>
-                Em conformidade com a Lei Geral de Proteção de Dados Pessoais (Lei nº 13.709/2018 — LGPD),
-                o FerroLab coleta e armazena <strong>exclusivamente no navegador do seu dispositivo</strong>{' '}
-                (<code>localStorage</code> com cópia sombra de segurança) os dados estritamente necessários ao
-                acompanhamento dos seus treinos: exercícios, cargas, repetições, RIR, notas de aparelhos,
-                sessões de cardio e registros opcionais de peso corporal em jejum.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                2. Zero Servidores Externos, Zero SDKs de Terceiros e Zero Geolocalização
-              </h3>
-              <p style={{ margin: 0 }}>
-                Esta aplicação <strong>não transmite</strong> seus dados para servidores remotos, não utiliza
-                cookies de rastreamento, não integra SDKs de publicidade ou analytics (como Google Analytics,
-                Meta Pixel ou Firebase), não solicita acesso à localização GPS e empacota localmente todas as
-                fontes tipográficas (<code>@fontsource</code>, licença SIL OFL 1.1), evitando até mesmo exposição
-                de endereço IP a CDNs externos.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                3. Base Legal para Dados Sensíveis de Saúde (Art. 5º, II e Art. 11)
-              </h3>
-              <p style={{ margin: 0 }}>
-                Informações de peso corporal e métricas de esforço físico são tratadas como dados pessoais
-                sensíveis referentes à saúde. Seu registro ocorre somente mediante seu{' '}
-                <strong>consentimento livre, informado, específico e destacado</strong>, podendo ser revogado a
-                qualquer instante em <em>Ajustes → Central de Privacidade</em>.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                4. Proteção de Crianças e Adolescentes (ECA e Art. 14 da LGPD)
-              </h3>
-              <p style={{ margin: 0 }}>
-                O aplicativo é destinado a maiores de 18 anos. Menores de idade somente podem utilizar a
-                ferramenta mediante consentimento específico e supervisão ativa de ao menos um dos pais ou
-                responsável legal, além de acompanhamento presencial qualificado para prática esportiva.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                5. Direitos do Titular (Art. 18 da LGPD)
-              </h3>
-              <p style={{ margin: 0 }}>
-                Você tem controle pleno e imediato sobre seus dados diretamente no aplicativo: acesso integral,
-                retificação/edição a qualquer momento, portabilidade em formatos abertos (<strong>JSON</strong> e{' '}
-                <strong>CSV</strong>), revogação de consentimento e <strong>eliminação total irreversível</strong>{' '}
-                em <em>Ajustes → Apagar Todos os Meus Dados</em>.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                6. Encarregado pelo Tratamento de Dados (DPO)
-              </h3>
-              <p style={{ margin: 0 }}>
-                Responsável técnico do projeto open-source: Carlos Guedes (<code>carlosguedes0007@gmail.com</code>).
-                Para uso comercial em escala ou versão em nuvem futura, este canal deverá ser atualizado com os
-                dados societários (CNPJ) e canal formal de atendimento ao titular.
-              </p>
-            </section>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 11, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                1. Natureza do Aplicativo e Transparência (CDC — Lei nº 8.078/1990)
-              </h3>
-              <p style={{ margin: 0 }}>
-                O FerroLab é oferecido de forma <strong>100% gratuita</strong>, sem assinaturas ocultas,
-                compras surpresa ou recursos travados atrás de paywall. Caso versões futuras venham a oferecer
-                planos pagos, os preços, limites e condições serão informados de forma ostensiva e prévia,
-                com cancelamento simplificado e respeito integral ao direito de arrependimento de 7 dias
-                (Art. 49 do Código de Defesa do Consumidor).
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                2. Aviso de Saúde e Limites de Atividade Regulada (CONFEF e CFM)
-              </h3>
-              <p style={{ margin: 0 }}>
-                As fórmulas matemáticas (Epley/Brzycki de 1RM, progressão dupla, alertas estatísticos de
-                estagnação/deload, cálculo de anilhas) e ilustrações informativas têm finalidade{' '}
-                <strong>estritamente educativa e de registro pessoal</strong>. O aplicativo não realiza
-                diagnóstico médico, não prescreve dietas e não substitui a prescrição nem o acompanhamento
-                individualizado por Profissional de Educação Física registrado no CREF (Lei nº 9.696/1998)
-                ou médico. Interrompa o exercício imediatamente em caso de dor aguda, tontura ou desconforto.
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                3. Estabilidade, Armazenamento Local e Backup
-              </h3>
-              <p style={{ margin: 0 }}>
-                Adotamos medidas técnicas de estabilidade e cópia sombra automática no dispositivo para
-                proteger seus registros contra falhas inesperadas. Como o armazenamento ocorre no navegador do
-                próprio aparelho, a limpeza manual de dados do navegador, troca de aparelho ou modo anônimo
-                pode remover o histórico local. Recomendamos exportar regularmente seu backup em JSON ou CSV.
-                Nenhuma disposição destes Termos exclui garantias legais irrenunciáveis previstas no CDC
-                (Art. 51, I).
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                4. Propriedade Intelectual e Licenças Open-Source
-              </h3>
-              <p style={{ margin: 0 }}>
-                O código-fonte, os diagramas anatômicos vetoriais autorais e a síntese sonora procedural Web
-                Audio do FerroLab são licenciados sob licença MIT. Bibliotecas de terceiros utilizam licenças
-                permissivas compatíveis (MIT, ISC, Apache-2.0, BSD e SIL OFL 1.1).
-              </p>
-            </section>
-
-            <section>
-              <h3 style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-primary)' }}>
-                5. Foro e Legislação Aplicável
-              </h3>
-              <p style={{ margin: 0 }}>
-                Estes Termos são regidos pelas leis da República Federativa do Brasil, preservando-se o foro
-                do domicílio do consumidor (Art. 101, I do CDC) sempre que aplicável.
-              </p>
-            </section>
-          </div>
-        )}
-
-        <button type="button" className="btn btn-primary btn-block" style={{ marginTop: 16 }} onClick={onClose}>
-          Entendido, fechar
+        <button type="button" className="fl-icon-btn" onClick={onClose} aria-label="Fechar">
+          <X size={18} />
         </button>
       </div>
-    </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <SegmentedControl
+          id="legal-docs-tabs"
+          variant="dark"
+          value={doc}
+          onChange={(v) => onSwitchDoc(v as 'privacy' | 'terms')}
+          options={[
+            { value: 'privacy', label: 'Política de Privacidade' },
+            { value: 'terms', label: 'Termos de Uso' },
+          ]}
+        />
+      </div>
+
+      {doc === 'privacy' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>1. Arquitetura 100% Local-First (LGPD)</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Em conformidade com a Lei nº 13.709/2018 (LGPD), o FerroLab armazena exclusivamente no seu
+              dispositivo (<code>localStorage</code> com cópia sombra) apenas os dados necessários ao seu
+              diário de treino: exercícios, séries, cargas, repetições, RIR, notas de aparelhos, cardio e
+              peso corporal opcional.
+            </p>
+          </section>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>2. Zero Servidores, Zero SDKs e Zero Localização</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Não enviamos dados a servidores externos, não usamos cookies de rastreamento, anúncios,
+              analytics nem geolocalização, e empacotamos localmente todas as fontes (<code>@fontsource</code>,
+              OFL 1.1).
+            </p>
+          </section>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>3. Dados Sensíveis e Menores (Art. 11 e 14 LGPD / ECA)</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Dados físicos são tratados apenas mediante consentimento específico e destacado. Uso destinado
+              a maiores de 18 anos ou menores sob supervisão e consentimento expresso de responsável legal.
+            </p>
+          </section>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>4. Direitos do Titular (Art. 18 LGPD)</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Você pode exportar tudo em JSON/CSV (portabilidade), revogar consentimento ou apagar
+              definitivamente todos os dados em <em>Ajustes → Privacidade & Legal</em>. Contato DPO:
+              <code> carlosguedes0007@gmail.com</code>.
+            </p>
+          </section>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>1. Natureza do Aplicativo e Transparência (CDC)</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              O FerroLab é 100% gratuito, sem paywalls ocultos. Caso versões futuras ofereçam planos pagos,
+              haverá transparência prévia, cancelamento simples e respeito ao direito de arrependimento de
+              7 dias (Art. 49 do CDC).
+            </p>
+          </section>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>2. Aviso de Saúde (CONFEF Lei 9.696/98 e CFM)</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Fórmulas matemáticas (1RM, progressão dupla, deload, anilhas) e ilustrações têm caráter
+              informativo e de registro pessoal, não substituindo médico nem Profissional de Educação Física
+              (CREF). Interrompa o treino em caso de dor aguda ou mal-estar.
+            </p>
+          </section>
+          <section>
+            <strong style={{ color: 'var(--ink-primary)' }}>3. Armazenamento, Backup e Responsabilidade</strong>
+            <p style={{ margin: '4px 0 0' }}>
+              Adotamos cópia sombra local e resgate emergencial contra falhas. Como os dados ficam no
+              aparelho, recomendamos backups periódicos em JSON/CSV. Nenhuma cláusula exclui garantias
+              legais irrenunciáveis do CDC (Art. 51, I).
+            </p>
+          </section>
+        </div>
+      )}
+
+      <button type="button" className="fl-btn fl-btn-volt fl-btn-block" style={{ marginTop: 18 }} onClick={onClose}>
+        Entendido, fechar
+      </button>
+    </SheetModal>
   );
 };

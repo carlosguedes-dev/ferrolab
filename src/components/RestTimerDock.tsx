@@ -1,7 +1,9 @@
 import React from 'react';
-import { FastForward, Pause, Play, Timer } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { FastForward, Pause, Play } from 'lucide-react';
 import type { RestTimerState } from '../types/workout';
 import { formatDuration } from '../engines/calculations';
+import { SPRING_SNAPPY } from './MotionPrimitives';
 
 interface RestTimerDockProps {
   timer: RestTimerState;
@@ -16,42 +18,56 @@ export const RestTimerDock: React.FC<RestTimerDockProps> = ({
   onTogglePause,
   onSkip,
 }) => {
-  const progress =
+  const ratio =
     timer.durationSeconds > 0
-      ? Math.max(0, Math.min(100, (timer.remainingSeconds / timer.durationSeconds) * 100))
+      ? Math.max(0, Math.min(1, timer.remainingSeconds / timer.durationSeconds))
       : 0;
   const isUrgent = timer.remainingSeconds <= 10 && !timer.paused;
+  const radius = 17;
+  const circ = 2 * Math.PI * radius;
 
   return (
-    <div className="rest-timer-dock" role="status" aria-live="polite" aria-label="Cronômetro de descanso">
+    <motion.div
+      className="fl-rest-float"
+      role="status"
+      aria-live="polite"
+      aria-label="Cronômetro de descanso"
+      initial={{ opacity: 0, y: 28, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 24, scale: 0.96 }}
+      transition={SPRING_SNAPPY}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
-              background: isUrgent ? 'var(--accent-volt-dim)' : 'var(--accent-ember-dim)',
-              border: isUrgent ? '1px solid var(--accent-volt)' : '1px solid var(--border-ember)',
-              display: 'grid',
-              placeItems: 'center',
-              color: isUrgent ? 'var(--accent-volt)' : '#FF8B57',
-              flexShrink: 0,
-            }}
-          >
-            <Timer size={20} />
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
+          {/* Anel SVG de contagem regressiva */}
+          <svg width="42" height="42" viewBox="0 0 42 42" style={{ flexShrink: 0 }}>
+            <circle cx="21" cy="21" r={radius} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3.5" />
+            <circle
+              cx="21"
+              cy="21"
+              r={radius}
+              fill="none"
+              stroke={isUrgent ? '#CCFF00' : '#FF622E'}
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeDasharray={circ}
+              strokeDashoffset={circ * (1 - ratio)}
+              transform="rotate(-90 21 21)"
+              style={{ transition: 'stroke-dashoffset 0.25s linear' }}
+            />
+          </svg>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#FF9C6E', fontWeight: 700 }}>
-              Descanso {timer.paused ? '(Pausado)' : 'em andamento'}
+            <div className="t-mono" style={{ fontSize: 22, fontWeight: 700, lineHeight: 1, color: isUrgent ? 'var(--volt)' : 'var(--ink-primary)' }}>
+              {formatDuration(timer.remainingSeconds)}
             </div>
             <div
               style={{
-                fontSize: 12,
-                color: 'var(--text-secondary)',
+                fontSize: 11.5,
+                color: 'var(--ink-secondary)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
+                marginTop: 3,
               }}
             >
               {timer.exerciseName}
@@ -59,58 +75,32 @@ export const RestTimerDock: React.FC<RestTimerDockProps> = ({
           </div>
         </div>
 
-        <div
-          className="font-mono"
-          style={{
-            fontSize: 30,
-            fontWeight: 800,
-            color: isUrgent ? 'var(--accent-volt)' : 'var(--text-primary)',
-            lineHeight: 1,
-          }}
-        >
-          {formatDuration(timer.remainingSeconds)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <button type="button" className="fl-btn fl-btn-ghost fl-btn-xs t-mono" onClick={() => onAdjust(-15)}>
+            -15
+          </button>
+          <button type="button" className="fl-btn fl-btn-ghost fl-btn-xs t-mono" onClick={() => onAdjust(15)}>
+            +15
+          </button>
+          <button
+            type="button"
+            className="fl-icon-btn"
+            style={{ width: 34, height: 34, borderRadius: 10 }}
+            onClick={onTogglePause}
+            aria-label={timer.paused ? 'Retomar descanso' : 'Pausar descanso'}
+          >
+            {timer.paused ? <Play size={14} /> : <Pause size={14} />}
+          </button>
+          <button
+            type="button"
+            className="fl-btn fl-btn-ember fl-btn-xs"
+            onClick={onSkip}
+            aria-label="Pular descanso"
+          >
+            <FastForward size={13} />
+          </button>
         </div>
       </div>
-
-      {/* Barra de progresso */}
-      <div
-        style={{
-          height: 5,
-          background: 'rgba(255,255,255,0.08)',
-          borderRadius: 99,
-          overflow: 'hidden',
-          margin: '9px 0',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${progress}%`,
-            background: isUrgent
-              ? 'linear-gradient(90deg, #C8FF2E, #84CC16)'
-              : 'linear-gradient(90deg, #FF6B2C, #F59E0B)',
-            transition: 'width 0.3s linear',
-          }}
-        />
-      </div>
-
-      {/* Controles rápidos de 1 mão */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1.2fr', gap: 6 }}>
-        <button type="button" className="btn btn-secondary btn-xs font-mono" onClick={() => onAdjust(-15)}>
-          -15 s
-        </button>
-        <button type="button" className="btn btn-secondary btn-xs font-mono" onClick={() => onAdjust(15)}>
-          +15 s
-        </button>
-        <button type="button" className="btn btn-ghost btn-xs" onClick={onTogglePause}>
-          {timer.paused ? <Play size={13} /> : <Pause size={13} />}
-          {timer.paused ? 'Retomar' : 'Pausar'}
-        </button>
-        <button type="button" className="btn btn-ember btn-xs" onClick={onSkip}>
-          <FastForward size={13} />
-          Pular
-        </button>
-      </div>
-    </div>
+    </motion.div>
   );
 };

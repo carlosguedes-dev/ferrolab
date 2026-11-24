@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from '../App';
 import { AppErrorBoundary } from '../components/ErrorPages';
 import { LEGAL_CONSENT_VERSION, STORAGE_KEY, createInitialAppState } from '../engines/storage';
@@ -16,13 +16,13 @@ function seedConsentedState() {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-describe('FerroLab UI & Fluxos Críticos', () => {
+describe('FerroLab v2 UI & Fluxos Críticos', () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.location.hash = '#/treino';
   });
 
-  it('exibe trava de consentimento LGPD/ECA/Saúde no primeiro acesso e libera após aceite explícito', () => {
+  it('exibe trava de consentimento LGPD/ECA/Saúde no primeiro acesso e libera após aceite explícito', async () => {
     render(<App />);
     expect(screen.getByText(/Antes do seu primeiro treino/i)).toBeInTheDocument();
 
@@ -36,53 +36,54 @@ describe('FerroLab UI & Fluxos Críticos', () => {
     expect(confirmBtn).not.toBeDisabled();
     fireEvent.click(confirmBtn);
 
-    expect(screen.queryByText(/Antes do seu primeiro treino/i)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/Antes do seu primeiro treino/i)).not.toBeInTheDocument();
+    });
   });
 
-  it('inicia Superior A com aquecimento automático sincronizado, agrupa Biset 9A+9B e só dispara descanso ao concluir B', () => {
+  it('inicia Superior A em Modo Foco com aquecimento sincronizado, navega ao Biset 9A+9B e só dispara descanso ao concluir B', () => {
     seedConsentedState();
     render(<App />);
 
-    // Encontra o botão que inicia Superior A (funciona em qualquer dia da semana)
     const buttons = screen.getAllByRole('button', { name: /Superior A/i });
     fireEvent.click(buttons[0]);
 
-    // Deve exibir séries de aquecimento marcadas (50%, 70%, 85%)
-    expect(screen.getByText(/SÉRIE DE AQUECIMENTO \(50%\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/SÉRIE DE AQUECIMENTO \(70%\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/SÉRIE DE AQUECIMENTO \(85%\)/i)).toBeInTheDocument();
-
-    // Editar a carga da 1ª série válida do 1º exercício (Supino reto) deve atualizar automaticamente o aquecimento 50/70/85%
+    // 1ª estação (Supino reto) já vem com aquecimento 50/70/85%
+    expect(screen.getByText(/Aquecimento progressivo/i)).toBeInTheDocument();
     const supinoCard = document.getElementById('exercise-card-supino-reto')!;
     const weightInputs = supinoCard.querySelectorAll<HTMLInputElement>('input[aria-label="Carga em kg"]');
-    // índices 0,1,2 são aquecimento; índice 3 é a 1ª série válida
     fireEvent.change(weightInputs[3], { target: { value: '100' } });
     expect(weightInputs[0].value).toBe('50');
     expect(weightInputs[1].value).toBe('70');
     expect(weightInputs[2].value).toBe('86');
 
-    // Deve agrupar Biset 9A + 9B
+    // Abre Mapa da Sessão e salta direto para o Biset 9A+9B
+    fireEvent.click(screen.getByRole('button', { name: /Abrir mapa da sessão/i }));
+    fireEvent.click(screen.getByRole('button', { name: /9A\+9B/i }));
+
     const bisetContainer = screen.getByTestId('biset-terca-9');
     expect(bisetContainer).toBeInTheDocument();
 
-    // Concluir 1ª série do 9A (Rosca Scott) NÃO deve abrir o dock de descanso
     const bisetCheckButtons = bisetContainer.querySelectorAll(
       'button[aria-label="Marcar série concluída"]',
     );
-    expect(bisetCheckButtons.length).toBe(6); // 3 de 9A + 3 de 9B
+    expect(bisetCheckButtons.length).toBe(6);
+
+    // Concluir 9A NÃO dispara descanso
     fireEvent.click(bisetCheckButtons[0]);
     expect(screen.queryByRole('status', { name: /Cronômetro de descanso/i })).not.toBeInTheDocument();
 
-    // Concluir 1ª série do 9B (Rosca martelo) DEVE disparar automaticamente o descanso!
+    // Concluir 9B DISPARA descanso automaticamente
     fireEvent.click(bisetCheckButtons[3]);
     expect(screen.getByRole('status', { name: /Cronômetro de descanso/i })).toBeInTheDocument();
   });
 
-  it('permite revogar consentimento LGPD exibindo tela dedicada 403 e restaurar acesso', () => {
+  it('permite revogar consentimento LGPD na sub-tela Privacidade & Legal exibindo tela 403', () => {
     seedConsentedState();
     window.location.hash = '#/ajustes';
     render(<App />);
 
+    fireEvent.click(screen.getByRole('button', { name: /Privacidade & Legal/i }));
     fireEvent.click(screen.getByRole('button', { name: /Revogar consentimento LGPD/i }));
     expect(screen.getByText(/403 · CONSENTIMENTO NECESSÁRIO/i)).toBeInTheDocument();
   });

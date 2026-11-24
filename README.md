@@ -1,6 +1,10 @@
-# FerroLab — Engenharia de Força & Recomposição
+# FerroLab v2 — Engenharia de Força & Recomposição (Web PWA + Android APK)
 
-Aplicativo web **mobile-first** de acompanhamento de treino de musculação em tempo real voltado para **força e perda de gordura**, projetado para ser operado na academia **com apenas uma mão**, com tema escuro industrial de alto contraste, tela sempre ativa (**Wake Lock**), salvamento local automático com cópia sombra e conformidade nativa com a **LGPD** e legislação brasileira.
+Aplicativo **mobile-first** (Web PWA + **Android `.APK` nativo via Capacitor**) de acompanhamento de treino de musculação em tempo real voltado para **força e perda de gordura**, projetado com estética minimalista dark industrial, animações fluidas (*Framer Motion*), telas separando informações sem poluição visual, ícone autoral adaptativo em titânio/Electric Volt, tela sempre ativa (**Wake Lock**), salvamento local automático com cópia sombra e conformidade nativa com a **LGPD**.
+
+### Download Direto & Acesso Online
+- **Android (`.APK`):** [Baixar FerroLab-Android.apk (GitHub Releases)](https://github.com/carlosguedes-dev/ferrolab/releases/latest/download/FerroLab-Android.apk)
+- **Web App / PWA (iOS & Android):** [https://carlosguedes-dev.github.io/ferrolab/](https://carlosguedes-dev.github.io/ferrolab/)
 
 ---
 

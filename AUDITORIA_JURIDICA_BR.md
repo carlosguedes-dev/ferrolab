@@ -54,17 +54,18 @@
 ## 2. Propriedade Intelectual (Lei nº 9.279/1996 — LPI e Lei nº 9.609/1998 — Lei de Software)
 
 ### 2.1 Auditoria de Dependências Open-Source (`npm run audit:licenses`) e Segurança (`npm audit`)
-Executamos auditoria automatizada em **100% dos 145 pacotes** em `node_modules` por meio de `scripts/audit-licenses.mjs` e verificação de CVEs com `npm audit` (**0 vulnerabilidades encontradas**):
+Executamos auditoria automatizada em **100% dos 233 pacotes** em `node_modules` (incluindo `framer-motion` MIT e `@capacitor/*` MIT para o build Android APK) por meio de `scripts/audit-licenses.mjs` e verificação de CVEs com `npm audit` (**0 vulnerabilidades encontradas**):
 
 | Licença | Quantidade | Compatível com Software Comercial Fechado? |
 | --- | ---: | --- |
-| `MIT` / `MIT-0` | 125 | Sim (totalmente permissiva) |
-| `ISC` | 7 | Sim (equivalente à MIT) |
-| `Apache-2.0` | 5 | Sim (permissiva com concessão expressa de patente) |
+| `MIT` / `MIT-0` | 189 | Sim (totalmente permissiva) |
+| `ISC` | 16 | Sim (equivalente à MIT) |
+| `BlueOak-1.0.0` | 10 | Sim (permissiva equivalente à MIT) |
+| `Apache-2.0` | 7 | Sim (permissiva com concessão expressa de patente) |
 | `OFL-1.1` (SIL Open Font License) | 3 | Sim (uso comercial livre em apps/web) |
-| `BSD-2-Clause` / `BSD-3-Clause` | 4 | Sim (permissiva) |
+| `BSD-2-Clause` / `BSD-3-Clause` / `0BSD` / `Unlicense` | 7 | Sim (totalmente permissiva) |
 | `CC-BY-4.0` | 1 (`caniuse-lite`, apenas build/dev) | Sim (dependência de desenvolvimento, não entra no bundle final) |
-| **`GPL` / `AGPL` / `SSPL` / `EUPL`** | **0** | **Nenhuma detectada — APROVADO** |
+| **`GPL` / `AGPL` / `LGPL` / `SSPL` / `EUPL`** | **0** | **Nenhuma detectada — APROVADO** |
 
 ### 2.2 Fontes, Ícones, Áudio e Ilustrações Anatômicas
 - **Fontes:** `@fontsource/barlow-condensed`, `@fontsource/inter`, `@fontsource/jetbrains-mono` — todas sob licença **SIL OFL 1.1** (uso comercial gratuito permitido).

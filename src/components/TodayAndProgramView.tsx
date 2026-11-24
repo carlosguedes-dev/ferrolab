@@ -1,18 +1,16 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertTriangle,
-  Calendar,
+  ArrowRight,
   ChevronRight,
-  Clock,
   Disc,
-  Dumbbell,
   Flame,
   HeartPulse,
-  Info,
-  Link2,
   Play,
   Scale,
   Sparkles,
+  X,
 } from 'lucide-react';
 import type {
   ActiveWorkoutDraft,
@@ -26,6 +24,13 @@ import type {
 } from '../types/workout';
 import { REST_DAYS } from '../data/programPreset';
 import { formatKg, getTodayISO } from '../engines/calculations';
+import { getWeekStartISO } from '../engines/analytics';
+import {
+  EASE_PREMIUM,
+  SegmentedControl,
+  SheetModal,
+  SubScreenSlide,
+} from './MotionPrimitives';
 
 interface TodayAndProgramViewProps {
   mode: 'today' | 'program';
@@ -45,6 +50,16 @@ interface TodayAndProgramViewProps {
   onClearDemoData: () => void;
 }
 
+const WEEK_STRIP = [
+  { label: 'S', jsDay: 1, isLift: false },
+  { label: 'T', jsDay: 2, isLift: true },
+  { label: 'Q', jsDay: 3, isLift: true },
+  { label: 'Q', jsDay: 4, isLift: true },
+  { label: 'S', jsDay: 5, isLift: true },
+  { label: 'S', jsDay: 6, isLift: false },
+  { label: 'D', jsDay: 0, isLift: false },
+];
+
 export const TodayAndProgramView: React.FC<TodayAndProgramViewProps> = ({
   mode,
   program,
@@ -62,456 +77,545 @@ export const TodayAndProgramView: React.FC<TodayAndProgramViewProps> = ({
   onLoadDemoData,
   onClearDemoData,
 }) => {
-  const jsDay = new Date().getDay(); // 0=Dom..6=Sáb
+  const now = new Date();
+  const jsDay = now.getDay();
   const todayWorkout = program.find((d) => d.jsDayIndex === jsDay) ?? null;
   const todayRest = REST_DAYS.find((r) => r.jsDayIndex === jsDay) ?? null;
 
-  const [selectedDayId, setSelectedDayId] = useState<WorkoutDayId>(
-    todayWorkout?.id ?? 'upper-a',
-  );
-  const [quickWeight, setQuickWeight] = useState<string>(() => {
-    const last = [...bodyWeights].sort((a, b) => b.date.localeCompare(a.date))[0];
-    return last ? String(last.weightKg) : '';
-  });
-  const [restCardioMin, setRestCardioMin] = useState(35);
-  const [restCardioDist, setRestCardioDist] = useState('3.2');
-  const [restCardioSaved, setRestCardioSaved] = useState(false);
+  // Estado da tela Ficha
+  const [fichaTab, setFichaTab] = useState<string>(todayWorkout?.id ?? 'upper-a');
 
-  const selectedDay = program.find((d) => d.id === selectedDayId) ?? program[0];
-  const latestWeight = [...bodyWeights].sort((a, b) => b.date.localeCompare(a.date))[0];
-  const totalWeeklySets = program.reduce(
-    (sum, day) => sum + day.exercises.reduce((s, e) => s + e.targetSets, 0),
-    0,
+  // Sheets limpos (separam informação secundária da tela principal!)
+  const [weightSheetOpen, setWeightSheetOpen] = useState(false);
+  const [cardioSheetOpen, setCardioSheetOpen] = useState(false);
+  const [deloadSheetOpen, setDeloadSheetOpen] = useState(false);
+
+  const latestWeight = useMemo(
+    () => [...bodyWeights].sort((a, b) => b.date.localeCompare(a.date))[0] ?? null,
+    [bodyWeights],
+  );
+  const [weightDraft, setWeightDraft] = useState<string>(
+    latestWeight ? String(latestWeight.weightKg) : '',
+  );
+  const [cardioMin, setCardioMin] = useState(35);
+  const [cardioDist, setCardioDist] = useState('3.2');
+
+  const currentWeekStart = useMemo(() => getWeekStartISO(now), []);
+  const completedDaysThisWeek = useMemo(() => {
+    const set = new Set<number>();
+    for (const s of sessions) {
+      if (getWeekStartISO(s.date) === currentWeekStart) {
+        const dt = new Date(`${s.date}T12:00:00`);
+        set.add(dt.getDay());
+      }
+    }
+    return set;
+  }, [sessions, currentWeekStart]);
+
+  const dateFormatted = useMemo(
+    () =>
+      now
+        .toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'short' })
+        .replace('.', ''),
+    [],
   );
 
   // =========================================================================
-  // MODO "FICHA COMPLETA" (Upper/Lower 4 dias + Descansos)
+  // TELA "FICHA" — Limpa, segmentada por dia e sem poluição
   // =========================================================================
   if (mode === 'program') {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <span className="pill pill-volt">UPPER / LOWER · 4 DIAS SEGUIDOS</span>
-              <h2 className="font-display" style={{ margin: '6px 0 2px', fontSize: 26 }}>
-                Ficha Definitiva Terça a Sexta
-              </h2>
-              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-secondary)' }}>
-                10 a 14 séries válidas diretas por grupo muscular · Descanso Sáb, Dom e Seg.
-              </p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div className="font-mono" style={{ fontSize: 24, fontWeight: 800, color: 'var(--accent-volt)' }}>
-                {totalWeeklySets}
-              </div>
-              <div className="section-label">séries/sem</div>
-            </div>
-          </div>
+    const selectedDay = program.find((d) => d.id === fichaTab) ?? null;
+    const totalWeeklySets = program.reduce(
+      (sum, d) => sum + d.exercises.reduce((a, e) => a + e.targetSets, 0),
+      0,
+    );
 
-          {/* Seletor rápido de dia da ficha */}
-          <div className="grid-4" style={{ marginTop: 12 }}>
-            {program.map((d) => {
-              const active = d.id === selectedDay.id;
-              return (
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <div>
+            <div className="t-kicker">Upper / Lower · 4 dias</div>
+            <h1 className="t-title" style={{ marginTop: 4 }}>
+              Ficha Semanal
+            </h1>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="t-mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--volt)' }}>
+              {totalWeeklySets}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--ink-tertiary)' }}>séries/sem</div>
+          </div>
+        </div>
+
+        <SegmentedControl
+          id="ficha-days"
+          value={fichaTab}
+          onChange={setFichaTab}
+          options={[
+            { value: 'upper-a', label: 'TER' },
+            { value: 'lower-a', label: 'QUA' },
+            { value: 'upper-b', label: 'QUI' },
+            { value: 'lower-b', label: 'SEX' },
+            { value: 'rest', label: 'DESC' },
+          ]}
+        />
+
+        <AnimatePresence mode="wait">
+          {selectedDay ? (
+            <SubScreenSlide screenKey={selectedDay.id}>
+              {/* Cabeçalho limpo do dia */}
+              <div className="fl-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div>
+                  <div className="t-kicker">{selectedDay.dayName}</div>
+                  <h2 className="t-display" style={{ margin: '4px 0 3px', fontSize: 30, fontWeight: 800 }}>
+                    {selectedDay.title}
+                  </h2>
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-secondary)' }}>
+                    {selectedDay.subtitle}
+                  </p>
+                </div>
                 <button
-                  key={d.id}
                   type="button"
-                  onClick={() => setSelectedDayId(d.id)}
-                  style={{
-                    padding: '9px 6px',
-                    borderRadius: 12,
-                    border: active
-                      ? '1.5px solid var(--accent-volt)'
-                      : '1px solid var(--border-subtle)',
-                    background: active ? 'var(--accent-volt-dim)' : '#0B0E14',
-                    textAlign: 'center',
-                  }}
+                  className="fl-btn fl-btn-volt fl-btn-sm"
+                  onClick={() => onStartWorkout(selectedDay.id)}
                 >
-                  <div
-                    className="font-mono"
+                  <Play size={14} fill="#070904" /> Treinar
+                </button>
+              </div>
+
+              {/* Lista limpa de exercícios */}
+              <div className="fl-list-group">
+                {selectedDay.exercises.map((ex, idx) => (
+                  <button
+                    key={ex.id}
+                    type="button"
+                    className="fl-list-row"
+                    onClick={() => onOpenExerciseDetail(selectedDay.id, ex)}
                     style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: active ? 'var(--accent-volt)' : 'var(--text-secondary)',
+                      borderLeft: ex.bisetGroup
+                        ? '3px solid var(--ember)'
+                        : idx === 0
+                          ? '3px solid var(--volt)'
+                          : '3px solid transparent',
                     }}
                   >
-                    {d.shortDay}
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2 }}>
-                    {d.title}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Detalhes do dia selecionado */}
-        <div className="card card-volt">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
-            <div>
-              <span className="pill pill-cyan">{selectedDay.dayName}</span>
-              <h3 className="font-display" style={{ margin: '6px 0 2px', fontSize: 25 }}>
-                {selectedDay.title} — {selectedDay.subtitle}
-              </h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                {selectedDay.exercises.length} exercícios ·{' '}
-                {selectedDay.exercises.reduce((a, e) => a + e.targetSets, 0)} séries válidas
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => onStartWorkout(selectedDay.id)}
-            >
-              <Play size={14} /> Treinar
-            </button>
-          </div>
-
-          <div className="divider" />
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {selectedDay.exercises.map((ex, idx) => (
-              <button
-                key={ex.id}
-                type="button"
-                onClick={() => onOpenExerciseDetail(selectedDay.id, ex)}
-                style={{
-                  textAlign: 'left',
-                  padding: '10px 11px',
-                  borderRadius: 12,
-                  background: ex.bisetGroup
-                    ? 'rgba(255, 107, 44, 0.08)'
-                    : 'rgba(10, 13, 18, 0.8)',
-                  border: ex.bisetGroup
-                    ? '1px solid rgba(255, 107, 44, 0.35)'
-                    : '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span
-                      className={`pill ${ex.bisetGroup ? 'pill-ember' : 'pill-volt'} font-mono`}
-                      style={{ padding: '1px 7px' }}
-                    >
-                      {ex.orderLabel}
-                    </span>
-                    {ex.bisetGroup && (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#FF8B57', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                        <Link2 size={10} /> BISET
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                      <span
+                        className="t-mono"
+                        style={{
+                          width: 28,
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          color: ex.bisetGroup
+                            ? '#ff8c66'
+                            : idx === 0
+                              ? 'var(--volt)'
+                              : 'var(--ink-tertiary)',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {ex.orderLabel}
                       </span>
-                    )}
-                    {idx === 0 && (
-                      <span className="pill pill-amber" style={{ padding: '1px 6px', fontSize: 10 }}>
-                        <Flame size={10} /> + Aquec. 50/70/85%
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ fontWeight: 700, fontSize: 14, marginTop: 4 }}>{ex.name}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2 }}>
-                    <span className="font-mono" style={{ color: 'var(--text-primary)' }}>
-                      {ex.targetSets}×{ex.repMin}–{ex.repMax}
-                      {ex.isIsometric ? 's' : ''}
-                    </span>{' '}
-                    · Descanso: {ex.restLabel}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {ex.techniqueCue}
-                  </div>
-                </div>
-                <Info size={16} color="#66758D" style={{ flexShrink: 0 }} />
-              </button>
-            ))}
-          </div>
-
-          <div
-            style={{
-              marginTop: 12,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: selectedDay.cardio.enabled
-                ? 'var(--accent-ember-dim)'
-                : 'rgba(255,255,255,0.03)',
-              border: selectedDay.cardio.enabled
-                ? '1px solid var(--border-ember)'
-                : '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 9,
-              fontSize: 12.5,
-            }}
-          >
-            <HeartPulse size={16} color={selectedDay.cardio.enabled ? '#FF8B57' : '#66758D'} />
-            <div>
-              <strong>{selectedDay.cardio.label}</strong>
-              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                {selectedDay.cardio.modalitySuggestion}
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 14.5,
+                            fontWeight: 600,
+                            color: 'var(--ink-primary)',
+                            lineHeight: 1.25,
+                          }}
+                        >
+                          {ex.name}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--ink-tertiary)',
+                            marginTop: 2,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                          }}
+                        >
+                          <span className="t-mono" style={{ color: 'var(--ink-secondary)' }}>
+                            {ex.targetSets}×{ex.repMin}–{ex.repMax}
+                            {ex.isIsometric ? 's' : ''}
+                          </span>
+                          <span>·</span>
+                          <span>{ex.restLabel}</span>
+                          {idx === 0 && (
+                            <>
+                              <span>·</span>
+                              <span style={{ color: 'var(--amber)' }}>+ Aquec.</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight size={17} color="var(--ink-tertiary)" style={{ flexShrink: 0 }} />
+                  </button>
+                ))}
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Bloco dos 3 dias de descanso */}
-        <div className="card">
-          <div className="section-label" style={{ marginBottom: 8 }}>
-            Dias de Descanso & Cardio Leve (Sáb · Dom · Seg)
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {REST_DAYS.map((rd) => (
+              {/* Linha discreta de cardio do dia */}
               <div
-                key={rd.dayOfWeek}
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  background: '#0A0D12',
-                  border: rd.optionalCardio
-                    ? '1px solid rgba(34, 211, 238, 0.3)'
-                    : '1px solid var(--border-subtle)',
-                }}
+                className="fl-card fl-card-compact"
+                style={{ display: 'flex', alignItems: 'center', gap: 12 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className="pill font-mono">{rd.shortDay}</span>
-                  <strong style={{ fontSize: 13.5 }}>{rd.title}</strong>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 11,
+                    background: selectedDay.cardio.enabled ? 'var(--ember-soft)' : 'rgba(255,255,255,0.04)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: selectedDay.cardio.enabled ? '#ff8c66' : 'var(--ink-tertiary)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <HeartPulse size={17} />
                 </div>
-                <p style={{ margin: '5px 0 0', fontSize: 12, color: 'var(--text-secondary)' }}>
-                  {rd.description}
-                </p>
-                {rd.optionalCardio && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: 'var(--accent-cyan)', fontWeight: 600 }}>
-                    Meta opcional: {rd.optionalCardio.label}
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{selectedDay.cardio.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-secondary)' }}>
+                    {selectedDay.cardio.modalitySuggestion}
                   </div>
-                )}
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
+            </SubScreenSlide>
+          ) : (
+            <SubScreenSlide screenKey="rest">
+              <div className="fl-list-group">
+                {REST_DAYS.map((rd) => (
+                  <div key={rd.dayOfWeek} className="fl-list-row" style={{ alignItems: 'flex-start' }}>
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <span
+                        className="t-mono"
+                        style={{
+                          width: 34,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: rd.optionalCardio ? 'var(--cyan)' : 'var(--ink-tertiary)',
+                          marginTop: 2,
+                        }}
+                      >
+                        {rd.shortDay}
+                      </span>
+                      <div>
+                        <div style={{ fontSize: 14.5, fontWeight: 600 }}>{rd.title}</div>
+                        <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--ink-secondary)' }}>
+                          {rd.description}
+                        </p>
+                        {rd.optionalCardio && (
+                          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: 'var(--cyan)' }}>
+                            Meta opcional: {rd.optionalCardio.label}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SubScreenSlide>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
 
   // =========================================================================
-  // MODO "TREINO DE HOJE" (Tela inicial principal de academia)
+  // TELA "HOJE" — Editorial, espaçosa, zero poluição visual
   // =========================================================================
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Banner de retomar treino em andamento */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Saudação editorial + fita semanal minimalista */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <div>
+            <div className="t-kicker" style={{ textTransform: 'capitalize' }}>
+              {dateFormatted}
+            </div>
+            <h1 className="t-title" style={{ fontSize: 28, marginTop: 3 }}>
+              {todayWorkout ? 'Pronto para treinar' : 'Recuperação ativa'}
+            </h1>
+          </div>
+          <span className="t-mono" style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>
+            {completedDaysThisWeek.size}/4 sem
+          </span>
+        </div>
+
+        {/* Fita dos 7 dias da semana */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 6,
+            padding: '10px 10px',
+            borderRadius: 18,
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--hairline)',
+          }}
+        >
+          {WEEK_STRIP.map((d, i) => {
+            const isToday = d.jsDay === jsDay;
+            const isDone = completedDaysThisWeek.has(d.jsDay);
+            return (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 0',
+                  borderRadius: 12,
+                  background: isToday ? 'rgba(255,255,255,0.05)' : 'transparent',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: isToday ? 700 : 500,
+                    color: isToday ? 'var(--ink-primary)' : 'var(--ink-tertiary)',
+                  }}
+                >
+                  {d.label}
+                </span>
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 99,
+                    background: isDone
+                      ? 'var(--volt)'
+                      : d.isLift
+                        ? 'rgba(255,255,255,0.16)'
+                        : 'rgba(255,255,255,0.05)',
+                    boxShadow: isDone ? '0 0 10px rgba(204,255,0,0.6)' : 'none',
+                    outline: isToday ? '2px solid rgba(204,255,0,0.45)' : 'none',
+                    outlineOffset: 2,
+                  }}
+                />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Aviso discreto de sessão pausada */}
       {activeDraft && (
-        <div className="card card-ember">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div>
-              <span className="pill pill-ember">SESSÃO PAUSADA / EM ANDAMENTO</span>
-              <h3 className="font-display" style={{ margin: '6px 0 2px', fontSize: 22 }}>
-                {activeDraft.workoutTitle}
-              </h3>
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)' }}>
-                Seus dados estão salvos localmente. Retome de onde parou.
-              </p>
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.985 }}
+          onClick={onResumeWorkout}
+          className="fl-card fl-card-compact"
+          style={{
+            width: '100%',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderColor: 'var(--ember-border)',
+            background: 'linear-gradient(135deg, rgba(255,98,46,0.14), var(--bg-elevated))',
+            textAlign: 'left',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#ff8c66', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              Sessão em andamento
             </div>
-            <button type="button" className="btn btn-ember btn-sm" onClick={onResumeWorkout}>
-              Retomar <ChevronRight size={16} />
-            </button>
+            <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>
+              {activeDraft.workoutTitle.split('—')[0]}
+            </div>
           </div>
-        </div>
+          <span className="fl-btn fl-btn-ember fl-btn-xs">
+            Retomar <ArrowRight size={13} />
+          </span>
+        </motion.button>
       )}
 
-      {/* Alerta inteligente de Deload se detectado */}
+      {/* Aviso discreto de Deload (só se recomendado) */}
       {deloadAlert.shouldDeload && (
-        <div className="card card-amber">
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <AlertTriangle size={20} color="#FBBF24" style={{ flexShrink: 0, marginTop: 2 }} />
+        <button
+          type="button"
+          onClick={() => setDeloadSheetOpen(true)}
+          className="fl-card fl-card-compact"
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            borderColor: 'var(--amber-border)',
+            textAlign: 'left',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AlertTriangle size={17} color="var(--amber)" />
             <div>
-              <span className="pill pill-amber">ALERTA INTELIGENTE DE DELOAD</span>
-              <p style={{ margin: '6px 0', fontSize: 13, color: '#FEF3C7' }}>
-                {deloadAlert.summary}
-              </p>
-              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11.5, color: '#FDE68A' }}>
-                {deloadAlert.protocolTips.slice(0, 2).map((tip, i) => (
-                  <li key={i}>{tip}</li>
-                ))}
-              </ul>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#fde68a' }}>
+                Deload sugerido esta semana
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--ink-secondary)' }}>
+                Toque para ver o protocolo de recuperação
+              </div>
             </div>
           </div>
-        </div>
+          <ChevronRight size={16} color="var(--ink-tertiary)" />
+        </button>
       )}
 
-      {/* Card principal do dia da semana atual */}
+      {/* HERO CARD ÚNICO DO DIA */}
       {todayWorkout ? (
-        <div className="card card-volt">
+        <motion.div
+          className="fl-hero-card"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: EASE_PREMIUM }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span className="pill pill-volt">
-              <Calendar size={11} /> HOJE · {todayWorkout.dayName.toUpperCase()}
+            <span className="fl-pill fl-pill-volt">{todayWorkout.dayName}</span>
+            <span className="t-mono" style={{ fontSize: 12, color: 'var(--ink-secondary)' }}>
+              {todayWorkout.exercises.length} estações ·{' '}
+              {todayWorkout.exercises.reduce((a, e) => a + e.targetSets, 0)} séries
             </span>
-            <span className="pill pill-cyan">{todayWorkout.focusTag}</span>
           </div>
-          <h1 className="font-display" style={{ margin: '10px 0 2px', fontSize: 34, lineHeight: 1 }}>
-            {todayWorkout.title}
-          </h1>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: 'var(--text-secondary)' }}>
-            {todayWorkout.subtitle}
-          </p>
 
-          <div className="grid-3" style={{ marginBottom: 14 }}>
-            <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-              <div className="section-label">Exercícios</div>
-              <div className="font-mono" style={{ fontSize: 18, fontWeight: 800 }}>
-                {todayWorkout.exercises.length}
-              </div>
-            </div>
-            <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-              <div className="section-label">Séries válidas</div>
-              <div className="font-mono" style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent-volt)' }}>
-                {todayWorkout.exercises.reduce((a, e) => a + e.targetSets, 0)}
-              </div>
-            </div>
-            <div style={{ background: '#0A0D12', borderRadius: 10, padding: '8px 10px', border: '1px solid var(--border-subtle)' }}>
-              <div className="section-label">Cardio</div>
-              <div className="font-mono" style={{ fontSize: 14, fontWeight: 800, marginTop: 3 }}>
-                {todayWorkout.cardio.enabled ? `${todayWorkout.cardio.targetMinutesMin} min` : 'Sem'}
-              </div>
-            </div>
-          </div>
+          <h2
+            className="t-display"
+            style={{ margin: '18px 0 6px', fontSize: 44, fontWeight: 800, letterSpacing: '0.01em' }}
+          >
+            {todayWorkout.title}
+          </h2>
+          <p style={{ margin: '0 0 22px', fontSize: 14.5, color: 'var(--ink-secondary)' }}>
+            {todayWorkout.subtitle}
+            {todayWorkout.cardio.enabled
+              ? ` · ${todayWorkout.cardio.targetMinutesMin} min cardio`
+              : ''}
+          </p>
 
           <button
             type="button"
-            className="btn btn-primary btn-block"
-            style={{ minHeight: 54, fontSize: 16 }}
+            className="fl-btn fl-btn-volt fl-btn-block"
             onClick={() => onStartWorkout(todayWorkout.id)}
           >
-            <Play size={18} fill="#090C06" />
-            Iniciar {todayWorkout.title} Agora
+            <Play size={18} fill="#070904" />
+            Iniciar {todayWorkout.title}
           </button>
-        </div>
+        </motion.div>
       ) : (
-        <div className="card card-cyan">
-          <span className="pill pill-cyan">
-            <Calendar size={11} /> HOJE · {todayRest?.dayName.toUpperCase() ?? 'DESCANSO'}
-          </span>
-          <h1 className="font-display" style={{ margin: '10px 0 4px', fontSize: 30, lineHeight: 1.05 }}>
-            {todayRest?.title ?? 'Dia de Descanso de Musculação'}
-          </h1>
-          <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text-secondary)' }}>
-            {todayRest?.description}
+        <motion.div
+          className="fl-hero-card"
+          style={{
+            background:
+              'radial-gradient(circle at 90% 12%, rgba(56,189,248,0.14), transparent 55%), linear-gradient(160deg, #151923 0%, #0d1017 100%)',
+          }}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: EASE_PREMIUM }}
+        >
+          <span className="fl-pill fl-pill-cyan">{todayRest?.dayName ?? 'Descanso'}</span>
+          <h2 className="t-display" style={{ margin: '16px 0 6px', fontSize: 38, fontWeight: 800 }}>
+            Descanso de Pesos
+          </h2>
+          <p style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--ink-secondary)' }}>
+            {todayRest?.optionalCardio
+              ? 'Meta opcional de hoje: 30 a 40 min de caminhada leve para sustentar o déficit calórico.'
+              : 'Recupere o sistema nervoso para render no máximo na sequência Terça a Sexta.'}
           </p>
-
-          {/* Meta opcional de cardio leve de sábado ou descanso ativo */}
-          <div
-            style={{
-              background: '#0A0D12',
-              border: '1px solid rgba(34, 211, 238, 0.3)',
-              borderRadius: 14,
-              padding: 12,
-            }}
+          <button
+            type="button"
+            className="fl-btn fl-btn-surface fl-btn-block"
+            onClick={() => setCardioSheetOpen(true)}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-              <HeartPulse size={16} color="#22D3EE" />
-              <strong style={{ fontSize: 13.5 }}>
-                {todayRest?.optionalCardio
-                  ? todayRest.optionalCardio.label
-                  : 'Registrar caminhada leve opcional (30–40 min)'}
-              </strong>
-            </div>
-            <div className="grid-2" style={{ marginBottom: 10 }}>
-              <div>
-                <label className="section-label" htmlFor="rest-cardio-min">Duração (min)</label>
-                <input
-                  id="rest-cardio-min"
-                  type="number"
-                  className="input input-compact"
-                  style={{ marginTop: 4 }}
-                  value={restCardioMin}
-                  onChange={(e) => setRestCardioMin(Math.max(1, Number(e.target.value) || 30))}
-                />
-              </div>
-              <div>
-                <label className="section-label" htmlFor="rest-cardio-dist">Distância (km)</label>
-                <input
-                  id="rest-cardio-dist"
-                  type="number"
-                  step="0.1"
-                  className="input input-compact"
-                  style={{ marginTop: 4 }}
-                  value={restCardioDist}
-                  onChange={(e) => setRestCardioDist(e.target.value)}
-                />
-              </div>
-            </div>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm btn-block"
-              onClick={() => {
-                onLogStandaloneCardio({
-                  id: `rest-cardio-${Date.now()}`,
-                  date: getTodayISO(),
-                  modality: 'Caminhada leve / Cardio Zona 2',
-                  minutes: restCardioMin,
-                  distanceKm: restCardioDist ? Number(restCardioDist) : undefined,
-                  completed: true,
-                });
-                setRestCardioSaved(true);
-              }}
-            >
-              {restCardioSaved ? 'Cardio de hoje registrado ✓' : 'Registrar cardio leve no gráfico'}
-            </button>
-          </div>
-        </div>
+            <HeartPulse size={17} color="var(--cyan)" />
+            Registrar cardio leve opcional
+          </button>
+        </motion.div>
       )}
 
-      {/* Acesso rápido a qualquer um dos 4 dias da ficha */}
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <span className="section-label">Escolher treino da semana (Ter → Sex)</span>
-          <button type="button" className="pill" onClick={onOpenPlateCalc}>
-            <Disc size={11} /> Anilhas
-          </button>
-        </div>
+      {/* 2 Atalhos Silenciosos: Peso em Jejum + Anilhas */}
+      <div className="fl-grid-2">
+        <button
+          type="button"
+          className="fl-card fl-card-compact"
+          style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 10 }}
+          onClick={() => {
+            setWeightDraft(latestWeight ? String(latestWeight.weightKg) : '');
+            setWeightSheetOpen(true);
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Scale size={17} color="var(--cyan)" />
+            <ChevronRight size={15} color="var(--ink-tertiary)" />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>Peso em jejum</div>
+            <div className="t-mono" style={{ fontSize: 20, fontWeight: 700, marginTop: 2 }}>
+              {latestWeight ? `${formatKg(latestWeight.weightKg)} kg` : 'Registrar'}
+            </div>
+          </div>
+        </button>
 
-        <div className="grid-2">
+        <button
+          type="button"
+          className="fl-card fl-card-compact"
+          style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 10 }}
+          onClick={onOpenPlateCalc}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Disc size={17} color="var(--volt)" />
+            <ChevronRight size={15} color="var(--ink-tertiary)" />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>Calculadora</div>
+            <div style={{ fontSize: 17, fontWeight: 700, marginTop: 3 }}>Anilhas</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Lista limpa para iniciar qualquer dia da ficha */}
+      <div>
+        <div className="t-kicker" style={{ marginBottom: 10, paddingLeft: 4 }}>
+          Treinos da semana (Ter → Sex)
+        </div>
+        <div className="fl-list-group">
           {program.map((day) => {
-            const lastSession = sessions.find((s) => s.workoutDayId === day.id);
+            const last = sessions.find((s) => s.workoutDayId === day.id);
             const isToday = day.jsDayIndex === jsDay;
             return (
               <button
                 key={day.id}
                 type="button"
+                className="fl-list-row"
                 onClick={() => onStartWorkout(day.id)}
-                style={{
-                  textAlign: 'left',
-                  padding: 12,
-                  borderRadius: 14,
-                  background: isToday
-                    ? 'linear-gradient(150deg, rgba(200,255,46,0.12), #0D1117)'
-                    : '#0B0F15',
-                  border: isToday
-                    ? '1.5px solid var(--border-volt)'
-                    : '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: 6,
-                }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className={`pill ${isToday ? 'pill-volt' : ''} font-mono`} style={{ padding: '2px 7px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+                  <span
+                    className="t-mono"
+                    style={{
+                      width: 34,
+                      fontSize: 11.5,
+                      fontWeight: 700,
+                      color: isToday ? 'var(--volt)' : 'var(--ink-tertiary)',
+                    }}
+                  >
                     {day.shortDay}
                   </span>
-                  <Dumbbell size={14} color={isToday ? '#C8FF2E' : '#66758D'} />
-                </div>
-                <div>
-                  <div className="font-display" style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.05 }}>
-                    {day.title}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                    {day.subtitle}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>{day.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)', marginTop: 1 }}>
+                      {day.subtitle}
+                    </div>
                   </div>
                 </div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Clock size={10} />
-                  {lastSession ? `Último: ${lastSession.date.split('-').reverse().slice(0, 2).join('/')}` : 'Ainda não realizado'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {last && (
+                    <span className="t-mono" style={{ fontSize: 11.5, color: 'var(--ink-tertiary)' }}>
+                      {last.date.split('-').reverse().slice(0, 2).join('/')}
+                    </span>
+                  )}
+                  <ChevronRight size={16} color="var(--ink-tertiary)" />
                 </div>
               </button>
             );
@@ -519,76 +623,169 @@ export const TodayAndProgramView: React.FC<TodayAndProgramViewProps> = ({
         </div>
       </div>
 
-      {/* Registro rápido de peso corporal em jejum */}
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <Scale size={16} color="#22D3EE" />
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Peso corporal em jejum</span>
-          </div>
-          {latestWeight && (
-            <span className="pill pill-cyan font-mono">
-              Último: {formatKg(latestWeight.weightKg)} kg
-            </span>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            type="number"
-            inputMode="decimal"
-            step="0.1"
-            placeholder="Ex.: 84.5 kg"
-            aria-label="Peso corporal em jejum em kg"
-            className="input input-compact"
-            value={quickWeight}
-            onChange={(e) => setQuickWeight(e.target.value)}
-          />
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            style={{ flexShrink: 0 }}
-            onClick={() => {
-              const num = Number(quickWeight.replace(',', '.'));
-              if (Number.isFinite(num) && num >= 25 && num <= 300) {
-                onQuickLogWeight(num, true);
-              }
-            }}
-          >
-            Salvar peso
+      {/* Atalho discreto para dados de demonstração */}
+      {sessions.length === 0 ? (
+        <button
+          type="button"
+          className="fl-btn fl-btn-ghost fl-btn-sm fl-btn-block"
+          onClick={onLoadDemoData}
+        >
+          <Sparkles size={14} color="var(--volt)" />
+          Ver demo com 4 semanas simuladas
+        </button>
+      ) : isDemoDataLoaded ? (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '10px 14px',
+            borderRadius: 14,
+            background: 'var(--amber-soft)',
+            fontSize: 12,
+            color: '#fde68a',
+          }}
+        >
+          <span>Modo demonstração ativo</span>
+          <button type="button" className="fl-btn fl-btn-xs fl-btn-danger" onClick={onClearDemoData}>
+            Zerar p/ meus dados
           </button>
         </div>
-      </div>
-
-      {/* Atalho opcional para testar gráficos com 4 semanas simuladas */}
-      {sessions.length === 0 ? (
-        <div className="card" style={{ borderStyle: 'dashed', borderColor: 'rgba(200,255,46,0.28)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 13 }}>
-                <Sparkles size={14} color="#C8FF2E" />
-                Quer ver os gráficos e a progressão em ação?
-              </div>
-              <p style={{ margin: '3px 0 0', fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                Carregue 4 semanas simuladas de exemplo (removíveis em 1 toque quando começar seus treinos reais).
-              </p>
-            </div>
-            <button type="button" className="btn btn-secondary btn-xs" onClick={onLoadDemoData}>
-              Ver demo
-            </button>
-          </div>
-        </div>
-      ) : isDemoDataLoaded ? (
-        <div className="card card-amber" style={{ padding: 11 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <span style={{ fontSize: 12, color: '#FDE68A' }}>
-              Modo demonstração ativo (4 semanas simuladas).
-            </span>
-            <button type="button" className="btn btn-danger btn-xs" onClick={onClearDemoData}>
-              Zerar p/ meus dados
-            </button>
-          </div>
-        </div>
       ) : null}
+
+      {/* Sheet: Registrar Peso em Jejum */}
+      <AnimatePresence>
+        {weightSheetOpen && (
+          <SheetModal ariaLabel="Registrar peso corporal em jejum" onClose={() => setWeightSheetOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div className="t-kicker">Acompanhamento de corte</div>
+                <h3 className="t-title" style={{ fontSize: 21, marginTop: 2 }}>
+                  Peso em Jejum
+                </h3>
+              </div>
+              <button type="button" className="fl-icon-btn" onClick={() => setWeightSheetOpen(false)} aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              placeholder="Ex.: 84.5"
+              aria-label="Peso corporal em jejum em kg"
+              className="fl-input t-mono"
+              style={{ fontSize: 24, textAlign: 'center', fontWeight: 700, marginBottom: 16 }}
+              value={weightDraft}
+              onChange={(e) => setWeightDraft(e.target.value)}
+            />
+            <button
+              type="button"
+              className="fl-btn fl-btn-volt fl-btn-block"
+              onClick={() => {
+                const num = Number(weightDraft.replace(',', '.'));
+                if (Number.isFinite(num) && num >= 25 && num <= 300) {
+                  onQuickLogWeight(num, true);
+                  setWeightSheetOpen(false);
+                }
+              }}
+            >
+              Salvar peso de hoje
+            </button>
+          </SheetModal>
+        )}
+      </AnimatePresence>
+
+      {/* Sheet: Registrar Cardio de Dia de Descanso */}
+      <AnimatePresence>
+        {cardioSheetOpen && (
+          <SheetModal ariaLabel="Registrar cardio leve" onClose={() => setCardioSheetOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div className="t-kicker">Cardio leve · Zona 2</div>
+                <h3 className="t-title" style={{ fontSize: 21, marginTop: 2 }}>
+                  Registrar Caminhada
+                </h3>
+              </div>
+              <button type="button" className="fl-icon-btn" onClick={() => setCardioSheetOpen(false)} aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="fl-grid-2" style={{ marginBottom: 16 }}>
+              <div>
+                <label className="t-kicker" htmlFor="rest-c-min">Minutos</label>
+                <input
+                  id="rest-c-min"
+                  type="number"
+                  className="fl-input t-mono"
+                  style={{ marginTop: 6, textAlign: 'center', fontWeight: 700 }}
+                  value={cardioMin}
+                  onChange={(e) => setCardioMin(Math.max(1, Number(e.target.value) || 30))}
+                />
+              </div>
+              <div>
+                <label className="t-kicker" htmlFor="rest-c-dist">Distância (km)</label>
+                <input
+                  id="rest-c-dist"
+                  type="number"
+                  step="0.1"
+                  className="fl-input t-mono"
+                  style={{ marginTop: 6, textAlign: 'center', fontWeight: 700 }}
+                  value={cardioDist}
+                  onChange={(e) => setCardioDist(e.target.value)}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              className="fl-btn fl-btn-volt fl-btn-block"
+              onClick={() => {
+                onLogStandaloneCardio({
+                  id: `rest-cardio-${Date.now()}`,
+                  date: getTodayISO(),
+                  modality: 'Caminhada leve / Cardio Zona 2',
+                  minutes: cardioMin,
+                  distanceKm: cardioDist ? Number(cardioDist) : undefined,
+                  completed: true,
+                });
+                setCardioSheetOpen(false);
+              }}
+            >
+              Salvar cardio no histórico
+            </button>
+          </SheetModal>
+        )}
+      </AnimatePresence>
+
+      {/* Sheet: Protocolo de Deload */}
+      <AnimatePresence>
+        {deloadSheetOpen && (
+          <SheetModal ariaLabel="Protocolo inteligente de Deload" onClose={() => setDeloadSheetOpen(false)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Flame size={18} color="var(--amber)" />
+                <h3 className="t-title" style={{ fontSize: 20 }}>Protocolo de Deload</h3>
+              </div>
+              <button type="button" className="fl-icon-btn" onClick={() => setDeloadSheetOpen(false)} aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+            <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--ink-secondary)' }}>
+              {deloadAlert.summary}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+              {deloadAlert.protocolTips.map((tip, i) => (
+                <div key={i} className="fl-card fl-card-compact" style={{ fontSize: 13 }}>
+                  {tip}
+                </div>
+              ))}
+            </div>
+            <button type="button" className="fl-btn fl-btn-surface fl-btn-block" onClick={() => setDeloadSheetOpen(false)}>
+              Entendido
+            </button>
+          </SheetModal>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,7 +1,10 @@
 import React, { useRef, useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
   Calculator,
+  ChevronLeft,
+  ChevronRight,
   Database,
   Disc,
   Download,
@@ -9,10 +12,10 @@ import {
   FileText,
   RotateCcw,
   Shield,
+  Sliders,
   Sparkles,
   Trash2,
   Upload,
-  Volume2,
 } from 'lucide-react';
 import type { AppStateData, UserSettings } from '../types/workout';
 import { calculate1RM, formatKg } from '../engines/calculations';
@@ -24,6 +27,7 @@ import {
   serializeBackupJSON,
   triggerFileDownload,
 } from '../engines/storage';
+import { SubScreenSlide } from './MotionPrimitives';
 
 interface SettingsAndToolsViewProps {
   state: AppStateData;
@@ -39,6 +43,8 @@ interface SettingsAndToolsViewProps {
   onShowToast: (msg: string, variant: 'pr' | 'info' | 'error') => void;
 }
 
+type SettingsScreen = 'menu' | 'tools' | 'prefs' | 'backup' | 'privacy';
+
 export const SettingsAndToolsView: React.FC<SettingsAndToolsViewProps> = ({
   state,
   onUpdateSettings,
@@ -52,39 +58,45 @@ export const SettingsAndToolsView: React.FC<SettingsAndToolsViewProps> = ({
   onClearDemoData,
   onShowToast,
 }) => {
+  const [screen, setScreen] = useState<SettingsScreen>('menu');
+  const [dir, setDir] = useState(1);
+
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
-
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [confirmResetFicha, setConfirmResetFicha] = useState(false);
 
-  // Calculadora rápida standalone de 1RM
   const [rmWeight, setRmWeight] = useState(80);
   const [rmReps, setRmReps] = useState(6);
   const rmResult = calculate1RM(rmWeight, rmReps, state.settings.formula1RM, 1);
 
   const storageKb = (getStorageFootprintBytes() / 1024).toFixed(1);
 
+  const goTo = (next: SettingsScreen) => {
+    setDir(next === 'menu' ? -1 : 1);
+    setScreen(next);
+  };
+
   const handleExportJSON = () => {
     const content = serializeBackupJSON(state);
-    const stamp = new Date().toISOString().slice(0, 10);
-    triggerFileDownload(content, `ferrolab-backup-${stamp}.json`, 'application/json;charset=utf-8');
-    onUpdateSettings({
-      lastBackupAt: new Date().toISOString(),
-      workoutsSinceLastBackup: 0,
-    });
-    onShowToast('Backup JSON completo exportado com checksum de integridade!', 'info');
+    triggerFileDownload(
+      content,
+      `ferrolab-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json;charset=utf-8',
+    );
+    onUpdateSettings({ lastBackupAt: new Date().toISOString(), workoutsSinceLastBackup: 0 });
+    onShowToast('Backup JSON completo exportado!', 'info');
   };
 
   const handleExportCSV = () => {
     const content = serializeBackupCSV(state);
-    const stamp = new Date().toISOString().slice(0, 10);
-    triggerFileDownload(content, `ferrolab-historico-${stamp}.csv`, 'text/csv;charset=utf-8');
-    onUpdateSettings({
-      lastBackupAt: new Date().toISOString(),
-      workoutsSinceLastBackup: 0,
-    });
-    onShowToast('Planilha CSV (treinos, cardio e peso) exportada!', 'info');
+    triggerFileDownload(
+      content,
+      `ferrolab-historico-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+    );
+    onUpdateSettings({ lastBackupAt: new Date().toISOString(), workoutsSinceLastBackup: 0 });
+    onShowToast('Planilha CSV exportada!', 'info');
   };
 
   const handleImportJSONFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -92,16 +104,15 @@ export const SettingsAndToolsView: React.FC<SettingsAndToolsViewProps> = ({
     e.target.value = '';
     if (!file) return;
     try {
-      const text = await file.text();
-      const parsed = parseBackupJSON(text);
+      const parsed = parseBackupJSON(await file.text());
       if (!parsed.ok || !parsed.data) {
         onShowToast(parsed.error ?? 'Falha ao importar JSON.', 'error');
         return;
       }
       onImportFullState(parsed.data);
-      onShowToast('Backup JSON restaurado com sucesso!', 'pr');
+      onShowToast('Backup JSON restaurado!', 'pr');
     } catch {
-      onShowToast('Não foi possível ler o arquivo selecionado.', 'error');
+      onShowToast('Não foi possível ler o arquivo.', 'error');
     }
   };
 
@@ -110,15 +121,14 @@ export const SettingsAndToolsView: React.FC<SettingsAndToolsViewProps> = ({
     e.target.value = '';
     if (!file) return;
     try {
-      const text = await file.text();
-      const parsed = parseBackupCSV(text, state);
+      const parsed = parseBackupCSV(await file.text(), state);
       if (!parsed.ok || !parsed.nextState) {
         onShowToast(parsed.error ?? 'Falha ao importar CSV.', 'error');
         return;
       }
       onImportFullState(parsed.nextState);
       onShowToast(
-        `CSV importado: ${parsed.importedSessions} treinos, ${parsed.importedBodyWeights} pesagens, ${parsed.importedCardios} cardios.`,
+        `Importado: ${parsed.importedSessions} treinos · ${parsed.importedBodyWeights} pesagens.`,
         'pr',
       );
     } catch {
@@ -126,434 +136,403 @@ export const SettingsAndToolsView: React.FC<SettingsAndToolsViewProps> = ({
     }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Ferramentas de Academia */}
-      <div className="card card-cyan">
-        <span className="pill pill-cyan">FERRAMENTAS DE ACADEMIA</span>
-        <h2 className="font-display" style={{ margin: '6px 0 10px', fontSize: 25 }}>
-          Calculadora de 1RM & Anilhas
+  const SubHeader: React.FC<{ title: string; kicker: string }> = ({ title, kicker }) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <button
+        type="button"
+        className="fl-icon-btn"
+        onClick={() => goTo('menu')}
+        aria-label="Voltar para Ajustes"
+      >
+        <ChevronLeft size={18} />
+      </button>
+      <div>
+        <div className="t-kicker">{kicker}</div>
+        <h2 className="t-title" style={{ fontSize: 22, marginTop: 2 }}>
+          {title}
         </h2>
-
-        <div className="grid-2" style={{ marginBottom: 10 }}>
-          <div>
-            <label className="section-label" htmlFor="tool-rm-w">Carga (kg)</label>
-            <input
-              id="tool-rm-w"
-              type="number"
-              inputMode="decimal"
-              className="input input-compact"
-              style={{ marginTop: 4 }}
-              value={rmWeight}
-              onChange={(e) => setRmWeight(Math.max(0, Number(e.target.value) || 0))}
-            />
-          </div>
-          <div>
-            <label className="section-label" htmlFor="tool-rm-r">Repetições</label>
-            <input
-              id="tool-rm-r"
-              type="number"
-              inputMode="numeric"
-              className="input input-compact"
-              style={{ marginTop: 4 }}
-              value={rmReps}
-              onChange={(e) => setRmReps(Math.max(1, Number(e.target.value) || 1))}
-            />
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: '#0A0D12',
-            borderRadius: 12,
-            border: '1px solid var(--border-subtle)',
-            padding: 11,
-            marginBottom: 10,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <Calculator size={14} color="#22D3EE" />
-              1RM ({state.settings.formula1RM === 'epley' ? 'Epley' : 'Brzycki'})
-            </span>
-            <span className="font-mono" style={{ fontSize: 24, fontWeight: 800, color: '#22D3EE' }}>
-              {formatKg(rmResult.selected)} kg
-            </span>
-          </div>
-          <div className="grid-4">
-            {rmResult.percentages.map((p) => (
-              <div
-                key={p.percent}
-                style={{
-                  background: '#131923',
-                  borderRadius: 9,
-                  padding: '6px 4px',
-                  textAlign: 'center',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <div className="font-mono" style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                  {p.percent}%
-                </div>
-                <div className="font-mono" style={{ fontSize: 14, fontWeight: 800 }}>
-                  {formatKg(p.weightKg)}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <button type="button" className="btn btn-primary btn-sm btn-block" onClick={onOpenPlateCalc}>
-          <Disc size={15} /> Abrir Calculadora Rápida de Anilhas (10 / 12 / 20 kg)
-        </button>
       </div>
+    </div>
+  );
 
-      {/* Preferências de Treino */}
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
-          <Volume2 size={16} color="#C8FF2E" />
-          <h3 className="font-display" style={{ margin: 0, fontSize: 21 }}>
-            Preferências de Treino
-          </h3>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+  return (
+    <>
+      <AnimatePresence mode="wait">
+        {/* MENU RAIZ LIMPO (SEPARA INFORMAÇÕES EM 4 SUB-TELAS!) */}
+        {screen === 'menu' && (
+          <SubScreenSlide screenKey="menu" direction={dir}>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>Fórmula de 1RM</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Epley (padrão) ou Brzycki</div>
+              <div className="t-kicker">Sistema & Ferramentas</div>
+              <h1 className="t-title" style={{ marginTop: 4 }}>
+                Ajustes
+              </h1>
             </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                type="button"
-                className={`btn btn-xs ${state.settings.formula1RM === 'epley' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onUpdateSettings({ formula1RM: 'epley' })}
-              >
-                Epley
+
+            <div className="fl-list-group">
+              <button type="button" className="fl-list-row" onClick={() => goTo('tools')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 12, background: 'var(--cyan-soft)', display: 'grid', placeItems: 'center', color: 'var(--cyan)' }}>
+                    <Calculator size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>Ferramentas de Academia</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>
+                      Calculadora 1RM (Epley/Brzycki) e Anilhas
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={17} color="var(--ink-tertiary)" />
               </button>
-              <button
-                type="button"
-                className={`btn btn-xs ${state.settings.formula1RM === 'brzycki' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => onUpdateSettings({ formula1RM: 'brzycki' })}
-              >
-                Brzycki
+
+              <button type="button" className="fl-list-row" onClick={() => goTo('prefs')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 12, background: 'var(--volt-soft)', display: 'grid', placeItems: 'center', color: 'var(--volt)' }}>
+                    <Sliders size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>Preferências de Treino</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>
+                      Wake Lock, sons, RIR, aquecimento e barra
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={17} color="var(--ink-tertiary)" />
+              </button>
+
+              <button type="button" className="fl-list-row" onClick={() => goTo('backup')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 12, background: 'var(--emerald-soft)', display: 'grid', placeItems: 'center', color: 'var(--emerald)' }}>
+                    <Database size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>Backup & Portabilidade</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>
+                      JSON, CSV ({storageKb} KB locais) e dados demo
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={17} color="var(--ink-tertiary)" />
+              </button>
+
+              <button type="button" className="fl-list-row" onClick={() => goTo('privacy')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: 12, background: 'var(--amber-soft)', display: 'grid', placeItems: 'center', color: 'var(--amber)' }}>
+                    <Shield size={18} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600 }}>Privacidade & Legal (LGPD)</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>
+                      Política, Termos, consentimento e exclusão
+                    </div>
+                  </div>
+                </div>
+                <ChevronRight size={17} color="var(--ink-tertiary)" />
               </button>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13.5 }}>Barra padrão (Anilhas)</div>
-              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>10 kg, 12 kg ou 20 kg</div>
+            <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--ink-tertiary)', paddingTop: 6 }}>
+              FerroLab v2.0 · 100% Local-First · 0 trackers
             </div>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {([10, 12, 20] as const).map((bw) => (
-                <button
-                  key={bw}
-                  type="button"
-                  className={`btn btn-xs font-mono ${state.settings.defaultBarWeightKg === bw ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => onUpdateSettings({ defaultBarWeightKg: bw })}
-                >
-                  {bw}kg
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {[
-            {
-              key: 'autoWakeLock' as const,
-              title: 'Tela sempre ativa no treino (Wake Lock)',
-              desc: 'Evita que o celular apague entre séries.',
-            },
-            {
-              key: 'autoStartRestTimer' as const,
-              title: 'Disparar descanso ao concluir série',
-              desc: 'Em Biset, dispara somente ao concluir o exercício B.',
-            },
-            {
-              key: 'autoGenerateWarmups' as const,
-              title: 'Gerar aquecimento automático (50/70/85%)',
-              desc: 'Antes do 1º exercício de cada dia sem afetar 1RM.',
-            },
-            {
-              key: 'showRirColumn' as const,
-              title: 'Exibir coluna de RIR (Reps na Reserva)',
-              desc: 'Ajuda a monitorar intensidade e sinalizar deload.',
-            },
-            {
-              key: 'soundEnabled' as const,
-              title: 'Alertas sonoros (Web Audio)',
-              desc: 'Bips limpos no fim do descanso, PRs e prancha.',
-            },
-            {
-              key: 'vibrationEnabled' as const,
-              title: 'Vibração tátil (Haptic)',
-              desc: 'Feedback no bolso/mão ao encerrar descanso.',
-            },
-          ].map((item) => (
-            <label
-              key={item.key}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 10,
-                padding: '8px 10px',
-                borderRadius: 11,
-                background: '#0A0D12',
-                border: '1px solid var(--border-subtle)',
-                cursor: 'pointer',
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{item.title}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{item.desc}</div>
-              </div>
-              <input
-                type="checkbox"
-                checked={state.settings[item.key]}
-                onChange={(e) => onUpdateSettings({ [item.key]: e.target.checked })}
-                style={{ width: 18, height: 18, accentColor: '#C8FF2E', flexShrink: 0 }}
-              />
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Backup Local JSON & CSV */}
-      <div className="card card-volt">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <Database size={16} color="#C8FF2E" />
-            <h3 className="font-display" style={{ margin: 0, fontSize: 21 }}>
-              Backup & Portabilidade (JSON / CSV)
-            </h3>
-          </div>
-          <span className="pill font-mono">{storageKb} KB</span>
-        </div>
-
-        <p style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--text-secondary)' }}>
-          Todos os dados são salvos automaticamente no aparelho com cópia sombra anti-corrupção.
-          {state.settings.lastBackupAt
-            ? ` Último backup: ${new Date(state.settings.lastBackupAt).toLocaleDateString('pt-BR')}.`
-            : ' Recomendamos exportar um backup periodicamente.'}
-        </p>
-
-        {state.settings.workoutsSinceLastBackup >= 4 && (
-          <div
-            style={{
-              marginBottom: 10,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: 'var(--accent-amber-dim)',
-              border: '1px solid rgba(245,158,11,0.4)',
-              fontSize: 12,
-              color: '#FDE68A',
-            }}
-          >
-            Você completou {state.settings.workoutsSinceLastBackup} treinos desde o último backup.
-            Exporte um JSON para garantir uma cópia fora do navegador!
-          </div>
+          </SubScreenSlide>
         )}
 
-        <div className="grid-2" style={{ marginBottom: 8 }}>
-          <button type="button" className="btn btn-primary btn-sm" onClick={handleExportJSON}>
-            <Download size={14} /> Exportar JSON
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => jsonInputRef.current?.click()}
-          >
-            <Upload size={14} /> Importar JSON
-          </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={handleExportCSV}>
-            <FileSpreadsheet size={14} /> Exportar CSV
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => csvInputRef.current?.click()}
-          >
-            <Upload size={14} /> Importar CSV
-          </button>
-        </div>
+        {/* SUB-TELA: FERRAMENTAS */}
+        {screen === 'tools' && (
+          <SubScreenSlide screenKey="tools" direction={dir}>
+            <SubHeader kicker="Ajustes" title="Ferramentas de Academia" />
 
-        <input
-          ref={jsonInputRef}
-          type="file"
-          accept=".json,application/json"
-          style={{ display: 'none' }}
-          onChange={handleImportJSONFile}
-        />
-        <input
-          ref={csvInputRef}
-          type="file"
-          accept=".csv,text/csv"
-          style={{ display: 'none' }}
-          onChange={handleImportCSVFile}
-        />
-
-        {/* Dados de demonstração */}
-        <div className="divider" />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <Sparkles size={13} color="#C8FF2E" />
-            Dados simulados (4 semanas)
-          </span>
-          {state.settings.isDemoDataLoaded ? (
-            <button type="button" className="btn btn-danger btn-xs" onClick={onClearDemoData}>
-              Limpar demo
-            </button>
-          ) : (
-            <button type="button" className="btn btn-ghost btn-xs" onClick={onLoadDemoData}>
-              Carregar exemplo
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Central de Privacidade LGPD & Documentos Legais */}
-      <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
-          <Shield size={16} color="#22D3EE" />
-          <h3 className="font-display" style={{ margin: 0, fontSize: 21 }}>
-            Central de Privacidade (LGPD) & Termos
-          </h3>
-        </div>
-
-        <div
-          style={{
-            background: '#0A0D12',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 11,
-            padding: 10,
-            fontSize: 12,
-            color: 'var(--text-secondary)',
-            marginBottom: 10,
-          }}
-        >
-          <div>
-            <strong>Status:</strong> 100% offline/local · 0 trackers · 0 localização · 0 SDKs externos.
-          </div>
-          <div style={{ marginTop: 4 }}>
-            <strong>Registros locais:</strong> {state.sessions.length} treinos ·{' '}
-            {state.bodyWeights.length} pesagens · {Object.keys(state.machineNotes).length} notas de aparelhos.
-          </div>
-          {state.consent.acceptedAt && (
-            <div style={{ marginTop: 4 }}>
-              <strong>Consentimento LGPD/ECA:</strong> registrado em{' '}
-              {new Date(state.consent.acceptedAt).toLocaleDateString('pt-BR')} (v{state.consent.acceptedVersion}).
-            </div>
-          )}
-        </div>
-
-        <div className="grid-2" style={{ marginBottom: 10 }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-xs"
-            onClick={() => onOpenLegalDoc('privacy')}
-          >
-            <FileText size={13} /> Política de Privacidade
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-xs"
-            onClick={() => onOpenLegalDoc('terms')}
-          >
-            <FileText size={13} /> Termos de Uso
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {!confirmResetFicha ? (
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs btn-block"
-              onClick={() => setConfirmResetFicha(true)}
-            >
-              <RotateCcw size={13} /> Restaurar ficha Upper/Lower padrão (mantém histórico)
-            </button>
-          ) : (
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-xs"
-                style={{ flex: 1 }}
-                onClick={() => setConfirmResetFicha(false)}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-xs"
-                style={{ flex: 1 }}
-                onClick={() => {
-                  onResetProgramOnly();
-                  setConfirmResetFicha(false);
-                }}
-              >
-                Confirmar restauração
-              </button>
-            </div>
-          )}
-
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs btn-block"
-            onClick={onRevokeConsent}
-          >
-            Revogar consentimento LGPD (Art. 18, IX)
-          </button>
-
-          {!confirmWipe ? (
-            <button
-              type="button"
-              className="btn btn-danger btn-sm btn-block"
-              onClick={() => setConfirmWipe(true)}
-            >
-              <Trash2 size={14} /> Apagar Todos os Meus Dados (LGPD Art. 18, VI)
-            </button>
-          ) : (
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                background: 'var(--accent-danger-dim)',
-                border: '1px solid rgba(244,63,94,0.55)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#FECDD3', fontWeight: 700, fontSize: 13 }}>
-                <AlertTriangle size={15} /> Exclusão irreversível de dados locais
+            <div className="fl-card">
+              <div className="t-kicker" style={{ marginBottom: 12 }}>
+                Calculadora de 1RM ({state.settings.formula1RM === 'epley' ? 'Epley' : 'Brzycki'})
               </div>
-              <p style={{ margin: '5px 0 10px', fontSize: 12, color: '#FFE4E6' }}>
-                Isso apagará permanentemente todo histórico de treinos, peso corporal, notas de
-                aparelhos, cópia sombra e preferências deste dispositivo. Deseja exportar JSON antes?
-              </p>
-              <div className="grid-2">
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-xs"
-                  onClick={() => setConfirmWipe(false)}
-                >
+              <div className="fl-grid-2" style={{ marginBottom: 14 }}>
+                <div>
+                  <label className="t-kicker" htmlFor="tool-rm-w">Carga (kg)</label>
+                  <input
+                    id="tool-rm-w"
+                    type="number"
+                    inputMode="decimal"
+                    className="fl-input t-mono"
+                    style={{ marginTop: 6, textAlign: 'center', fontWeight: 700, fontSize: 18 }}
+                    value={rmWeight}
+                    onChange={(e) => setRmWeight(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </div>
+                <div>
+                  <label className="t-kicker" htmlFor="tool-rm-r">Reps</label>
+                  <input
+                    id="tool-rm-r"
+                    type="number"
+                    inputMode="numeric"
+                    className="fl-input t-mono"
+                    style={{ marginTop: 6, textAlign: 'center', fontWeight: 700, fontSize: 18 }}
+                    value={rmReps}
+                    onChange={(e) => setRmReps(Math.max(1, Number(e.target.value) || 1))}
+                  />
+                </div>
+              </div>
+
+              <div style={{ textAlign: 'center', padding: '12px 0 16px' }}>
+                <div className="t-kicker">1RM Estimado</div>
+                <div className="t-mono" style={{ fontSize: 38, fontWeight: 700, color: 'var(--cyan)', marginTop: 4 }}>
+                  {formatKg(rmResult.selected)} kg
+                </div>
+              </div>
+
+              <div className="fl-grid-4">
+                {rmResult.percentages.map((p) => (
+                  <div
+                    key={p.percent}
+                    style={{
+                      background: 'var(--bg-canvas)',
+                      borderRadius: 12,
+                      padding: '10px 4px',
+                      textAlign: 'center',
+                      border: '1px solid var(--hairline)',
+                    }}
+                  >
+                    <div className="t-mono" style={{ fontSize: 11, color: 'var(--ink-tertiary)' }}>
+                      {p.percent}%
+                    </div>
+                    <div className="t-mono" style={{ fontSize: 15, fontWeight: 700, marginTop: 3 }}>
+                      {formatKg(p.weightKg)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button type="button" className="fl-btn fl-btn-volt fl-btn-block" onClick={onOpenPlateCalc}>
+              <Disc size={17} /> Abrir Calculadora de Anilhas (10 / 12 / 20 kg)
+            </button>
+          </SubScreenSlide>
+        )}
+
+        {/* SUB-TELA: PREFERÊNCIAS */}
+        {screen === 'prefs' && (
+          <SubScreenSlide screenKey="prefs" direction={dir}>
+            <SubHeader kicker="Ajustes" title="Preferências de Treino" />
+
+            <div className="fl-list-group">
+              <div className="fl-list-row">
+                <div>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>Fórmula de 1RM</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>Epley ou Brzycki</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {(['epley', 'brzycki'] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`fl-btn fl-btn-xs ${
+                        state.settings.formula1RM === f ? 'fl-btn-volt' : 'fl-btn-ghost'
+                      }`}
+                      onClick={() => onUpdateSettings({ formula1RM: f })}
+                    >
+                      {f === 'epley' ? 'Epley' : 'Brzycki'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="fl-list-row">
+                <div>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>Barra padrão</div>
+                  <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>Calculadora de anilhas</div>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {([10, 12, 20] as const).map((bw) => (
+                    <button
+                      key={bw}
+                      type="button"
+                      className={`fl-btn fl-btn-xs t-mono ${
+                        state.settings.defaultBarWeightKg === bw ? 'fl-btn-volt' : 'fl-btn-ghost'
+                      }`}
+                      onClick={() => onUpdateSettings({ defaultBarWeightKg: bw })}
+                    >
+                      {bw}kg
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {[
+                { key: 'autoWakeLock' as const, title: 'Tela sempre ativa', desc: 'Mantém a tela ligada no treino' },
+                { key: 'autoStartRestTimer' as const, title: 'Descanso automático', desc: 'Em Biset, dispara só após B' },
+                { key: 'autoGenerateWarmups' as const, title: 'Aquecimento automático', desc: '50/70/85% no 1º exercício' },
+                { key: 'showRirColumn' as const, title: 'Coluna de RIR', desc: 'Monitoramento de intensidade' },
+                { key: 'soundEnabled' as const, title: 'Sons Web Audio', desc: 'Alertas de descanso, PR e prancha' },
+                { key: 'vibrationEnabled' as const, title: 'Vibração tátil', desc: 'Feedback háptico no celular' },
+              ].map((item) => (
+                <label key={item.key} className="fl-list-row" style={{ cursor: 'pointer' }}>
+                  <div>
+                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{item.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--ink-tertiary)' }}>{item.desc}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={state.settings[item.key]}
+                    onChange={(e) => onUpdateSettings({ [item.key]: e.target.checked })}
+                    style={{ width: 19, height: 19, accentColor: 'var(--volt)' }}
+                  />
+                </label>
+              ))}
+            </div>
+
+            {!confirmResetFicha ? (
+              <button
+                type="button"
+                className="fl-btn fl-btn-ghost fl-btn-sm fl-btn-block"
+                onClick={() => setConfirmResetFicha(true)}
+              >
+                <RotateCcw size={14} /> Restaurar ficha Upper/Lower padrão
+              </button>
+            ) : (
+              <div className="fl-grid-2">
+                <button type="button" className="fl-btn fl-btn-surface fl-btn-sm" onClick={() => setConfirmResetFicha(false)}>
                   Cancelar
                 </button>
                 <button
                   type="button"
-                  className="btn btn-danger btn-xs"
+                  className="fl-btn fl-btn-volt fl-btn-sm"
                   onClick={() => {
-                    onWipeAllData();
-                    setConfirmWipe(false);
+                    onResetProgramOnly();
+                    setConfirmResetFicha(false);
                   }}
                 >
-                  Apagar tudo agora
+                  Confirmar
+                </button>
+              </div>
+            )}
+          </SubScreenSlide>
+        )}
+
+        {/* SUB-TELA: BACKUP */}
+        {screen === 'backup' && (
+          <SubScreenSlide screenKey="backup" direction={dir}>
+            <SubHeader kicker="Ajustes" title="Backup & Portabilidade" />
+
+            <div className="fl-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span className="t-kicker">Armazenamento local</span>
+                <span className="fl-pill t-mono">{storageKb} KB</span>
+              </div>
+              <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--ink-secondary)' }}>
+                Autosave com cópia sombra ativo.
+                {state.settings.lastBackupAt
+                  ? ` Último backup: ${new Date(state.settings.lastBackupAt).toLocaleDateString('pt-BR')}.`
+                  : ' Exporte regularmente para manter uma cópia fora do navegador.'}
+              </p>
+
+              <div className="fl-grid-2">
+                <button type="button" className="fl-btn fl-btn-volt fl-btn-sm" onClick={handleExportJSON}>
+                  <Download size={14} /> Exportar JSON
+                </button>
+                <button type="button" className="fl-btn fl-btn-surface fl-btn-sm" onClick={() => jsonInputRef.current?.click()}>
+                  <Upload size={14} /> Importar JSON
+                </button>
+                <button type="button" className="fl-btn fl-btn-surface fl-btn-sm" onClick={handleExportCSV}>
+                  <FileSpreadsheet size={14} /> Exportar CSV
+                </button>
+                <button type="button" className="fl-btn fl-btn-ghost fl-btn-sm" onClick={() => csvInputRef.current?.click()}>
+                  <Upload size={14} /> Importar CSV
                 </button>
               </div>
             </div>
-          )}
-        </div>
-      </div>
-    </div>
+
+            <div className="fl-card fl-card-compact" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <Sparkles size={15} color="var(--volt)" />
+                <span>Dados simulados (4 semanas)</span>
+              </div>
+              {state.settings.isDemoDataLoaded ? (
+                <button type="button" className="fl-btn fl-btn-danger fl-btn-xs" onClick={onClearDemoData}>
+                  Limpar demo
+                </button>
+              ) : (
+                <button type="button" className="fl-btn fl-btn-surface fl-btn-xs" onClick={onLoadDemoData}>
+                  Carregar
+                </button>
+              )}
+            </div>
+          </SubScreenSlide>
+        )}
+
+        {/* SUB-TELA: PRIVACIDADE & LGPD */}
+        {screen === 'privacy' && (
+          <SubScreenSlide screenKey="privacy" direction={dir}>
+            <SubHeader kicker="Ajustes" title="Privacidade & Legal (LGPD)" />
+
+            <div className="fl-card">
+              <div className="t-kicker" style={{ marginBottom: 8 }}>Transparência</div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-secondary)', lineHeight: 1.55 }}>
+                100% local-first no dispositivo · 0 servidores · 0 localização · 0 SDKs de terceiros.
+                Registros atuais: {state.sessions.length} treinos e {state.bodyWeights.length} pesagens.
+              </p>
+            </div>
+
+            <div className="fl-list-group">
+              <button type="button" className="fl-list-row" onClick={() => onOpenLegalDoc('privacy')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <FileText size={16} color="var(--volt)" />
+                  <span style={{ fontSize: 14.5, fontWeight: 600 }}>Política de Privacidade</span>
+                </div>
+                <ChevronRight size={16} color="var(--ink-tertiary)" />
+              </button>
+              <button type="button" className="fl-list-row" onClick={() => onOpenLegalDoc('terms')}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <FileText size={16} color="var(--cyan)" />
+                  <span style={{ fontSize: 14.5, fontWeight: 600 }}>Termos de Uso</span>
+                </div>
+                <ChevronRight size={16} color="var(--ink-tertiary)" />
+              </button>
+              <button type="button" className="fl-list-row" onClick={onRevokeConsent}>
+                <span style={{ fontSize: 14, color: 'var(--ink-secondary)' }}>
+                  Revogar consentimento LGPD (Art. 18, IX)
+                </span>
+                <ChevronRight size={16} color="var(--ink-tertiary)" />
+              </button>
+            </div>
+
+            {!confirmWipe ? (
+              <button
+                type="button"
+                className="fl-btn fl-btn-danger fl-btn-sm fl-btn-block"
+                onClick={() => setConfirmWipe(true)}
+              >
+                <Trash2 size={15} /> Apagar Todos os Meus Dados (LGPD Art. 18, VI)
+              </button>
+            ) : (
+              <div className="fl-card" style={{ borderColor: 'rgba(251,113,133,0.45)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--rose)', fontWeight: 700, fontSize: 14 }}>
+                  <AlertTriangle size={16} /> Exclusão permanente
+                </div>
+                <p style={{ margin: '6px 0 14px', fontSize: 12.5, color: 'var(--ink-secondary)' }}>
+                  Remove irreversivelmente todos os treinos, pesos, notas de aparelhos e cópia sombra deste aparelho.
+                </p>
+                <div className="fl-grid-2">
+                  <button type="button" className="fl-btn fl-btn-surface fl-btn-sm" onClick={() => setConfirmWipe(false)}>
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="fl-btn fl-btn-danger fl-btn-sm"
+                    onClick={() => {
+                      onWipeAllData();
+                      setConfirmWipe(false);
+                    }}
+                  >
+                    Apagar tudo agora
+                  </button>
+                </div>
+              </div>
+            )}
+          </SubScreenSlide>
+        )}
+      </AnimatePresence>
+
+      <input ref={jsonInputRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={handleImportJSONFile} />
+      <input ref={csvInputRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleImportCSVFile} />
+    </>
   );
 };

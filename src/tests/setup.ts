@@ -1,6 +1,9 @@
 import '@testing-library/jest-dom/vitest';
+import { MotionGlobalConfig } from 'framer-motion';
 
-// Mock leve de matchMedia e scrollTo para jsdom
+// Evita retenção de nós em saída de AnimatePresence no jsdom durante testes unitários
+MotionGlobalConfig.skipAnimations = true;
+
 Object.defineProperty(window, 'scrollTo', {
   value: () => {},
   writable: true,

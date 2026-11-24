@@ -12,11 +12,6 @@ interface IsometricTimerInlineProps {
   onFinishTarget: (sec: number) => void;
 }
 
-/**
- * Cronômetro embutido para exercícios isométricos (ex.: Prancha abdominal 45–60 s).
- * Emite alerta sonoro/vibração ao atingir o mínimo (45 s) e o teto (60 s),
- * preenchendo automaticamente o tempo na série.
- */
 export const IsometricTimerInline: React.FC<IsometricTimerInlineProps> = ({
   targetMinSec,
   targetMaxSec,
@@ -50,7 +45,6 @@ export const IsometricTimerInline: React.FC<IsometricTimerInlineProps> = ({
         return next;
       });
     }, 1000);
-
     return () => window.clearInterval(interval);
   }, [running, targetMinSec, targetMaxSec, soundEnabled, vibrationEnabled, onChangeSeconds, onFinishTarget]);
 
@@ -71,29 +65,28 @@ export const IsometricTimerInline: React.FC<IsometricTimerInlineProps> = ({
 
   const displaySec = running || elapsed > 0 ? elapsed : currentSeconds;
   const reachedMin = displaySec >= targetMinSec;
-  const reachedMax = displaySec >= targetMaxSec;
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <button
         type="button"
         onClick={handleToggle}
-        className={`btn btn-xs ${running ? 'btn-ember' : 'btn-secondary'}`}
-        style={{ minWidth: 74, fontFamily: 'var(--font-mono)' }}
+        className={`fl-btn fl-btn-xs t-mono ${running ? 'fl-btn-ember' : 'fl-btn-surface'}`}
+        style={{ minHeight: 40, minWidth: 74 }}
         aria-label={running ? 'Pausar cronômetro isométrico' : 'Iniciar cronômetro isométrico'}
       >
-        {running ? <Pause size={12} /> : <Play size={12} />}
-        <span style={{ color: reachedMax ? '#080B04' : reachedMin ? '#C8FF2E' : undefined }}>
+        {running ? <Pause size={13} /> : <Play size={13} />}
+        <span style={{ color: !running && reachedMin ? 'var(--volt)' : undefined }}>
           {displaySec}s
         </span>
       </button>
       {elapsed > 0 && !running && (
         <button
           type="button"
-          className="btn btn-ghost btn-xs"
+          className="fl-icon-btn"
+          style={{ width: 32, height: 32, borderRadius: 10 }}
           onClick={handleReset}
           aria-label="Zerar cronômetro isométrico"
-          style={{ padding: '0 6px' }}
         >
           <RotateCcw size={12} />
         </button>
